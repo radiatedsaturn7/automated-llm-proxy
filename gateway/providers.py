@@ -3,6 +3,7 @@ import ipaddress
 import json
 import math
 import socket
+import time
 import re
 from urllib.parse import urlparse
 
@@ -401,8 +402,13 @@ def translate_response(provider, data, model, endpoint=None, payload=None):
 
 
 class StreamTranslator:
-    def __init__(self, provider, model):
+    def __init__(self, provider, model, *, max_bytes=16_777_216, max_events=100_000,
+                 duration_seconds=300, deadline=None):
         self.provider, self.model = provider, model
+        self.max_bytes, self.max_events = max_bytes, max_events
+        self.duration_seconds, self.deadline = duration_seconds, deadline
+        self.received_bytes = 0
+        self.received_events = 0
         self.usage = None
         self.input_tokens = None
         self.complete = False
@@ -536,12 +542,33 @@ class StreamTranslator:
             result['usage'] = self.usage
         return result
 
+    def remaining(self):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            self.complete = False
+            raise ValueError("Upstream stream duration exceeded")
+        return remaining
+
+    def count_event(self):
+        self.remaining()
+        self.received_events += 1
+        if self.received_events > self.max_events:
+            self.complete = False
+            raise ValueError("Upstream stream event limit exceeded")
+
     async def iterate(self, response):
+        if self.deadline is None:
+            self.deadline = time.monotonic() + self.duration_seconds
         # SSE parser supports multi-line data and bounds each event.
         lines = []
         size = 0
+        frame_started = False
         async for line in self.bounded_lines(response):
+            self.remaining()
             if not line:
+                if frame_started:
+                    self.count_event()  # Includes comment-only and unknown-field frames.
+                    frame_started = False
                 if lines:
                     data = "\n".join(lines)
                     lines, size = [], 0
@@ -549,18 +576,25 @@ class StreamTranslator:
                         if self.provider.kind in {"gemini", "anthropic"} and not self.complete:
                             raise ValueError("Native provider stream missing completion")
                         self.complete = True
+                        self.remaining()
                         yield b"data: [DONE]\n\n"
                         return
                     event = self.event(json_object(data))
                     if event is not None:
-                        yield ("data: " + json.dumps(event) + "\n\n").encode()
+                        encoded = ("data: " + json.dumps(event) + "\n\n").encode()
+                        self.remaining()
+                        yield encoded
                 continue
+            frame_started = True
             if line.startswith("data:"):
                 value = line[5:].lstrip(" ")
                 size += len(value)
                 if size > 1_048_576:
                     raise ValueError("Upstream event too large")
                 lines.append(value)
+        if frame_started:
+            self.count_event()
+        self.remaining()
         if lines:
             data = "\n".join(lines)
             if data == "[DONE]":
@@ -570,17 +604,32 @@ class StreamTranslator:
             else:
                 event = self.event(json_object(data))
                 if event is not None:
-                    yield ("data: " + json.dumps(event) + "\n\n").encode()
+                    encoded = ("data: " + json.dumps(event) + "\n\n").encode()
+                    self.remaining()
+                    yield encoded
         if not self.complete:
             raise ValueError("Provider stream ended without completion marker")
+        self.remaining()
         yield b"data: [DONE]\n\n"
 
-    @staticmethod
-    async def bounded_lines(response):
+    async def bounded_lines(self, response):
         # httpx.aiter_lines buffers until newline with no length limit. Bound the
         # buffer before decoding, including non-data/comment lines.
         pending = bytearray()
-        async for chunk in response.aiter_bytes():
+        chunks = response.aiter_bytes().__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(anext(chunks), timeout=self.remaining())
+            except StopAsyncIteration:
+                break
+            except TimeoutError as exc:
+                self.complete = False
+                raise ValueError("Upstream stream duration exceeded") from exc
+            self.remaining()
+            self.received_bytes += len(chunk)
+            if self.received_bytes > self.max_bytes:
+                self.complete = False
+                raise ValueError("Upstream stream byte limit exceeded")
             pending.extend(chunk)
             while b"\n" in pending:
                 line, _, rest = pending.partition(b"\n")

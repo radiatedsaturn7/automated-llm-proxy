@@ -82,3 +82,43 @@ A malformed response does not establish that the provider did no work: the gatew
 retains conservative billing and returns a generic failure without the raw body.
 Optional generated-output guards apply after supported normalization; see
 [guardrails](guardrails.md) for streaming exclusions and billing semantics.
+
+## Bounded upstream streams
+
+Every streaming adapter has finite, configurable response limits:
+
+- `PROVIDER_STREAM_DURATION_SECONDS=300`: absolute time from upstream dispatch,
+  including waiting for response headers (range 1–3600 seconds). This does not reset
+  when tokens or keepalive comments arrive. `PROVIDER_TIMEOUT_SECONDS` remains the
+  separate HTTP connect/read-inactivity timeout; whichever expires first applies.
+- `PROVIDER_STREAM_MAX_BYTES=16777216`: total decoded upstream response-body bytes,
+  including comments, ignored fields and delimiters (range 1024–268435456 bytes).
+- `PROVIDER_STREAM_MAX_EVENTS=100000`: total nonempty SSE frames, including
+  comment-only frames and the completion marker (range 1–1000000).
+
+The existing 1 MiB individual line/event limit also applies. Exact byte/event limits
+are inclusive; an additional byte or event fails the stream. Endlessly empty lines
+are still bounded by total bytes and time. Set the same limits on every replica
+through environment configuration (or Helm `extraEnv`) and tune them for legitimate
+long-running workloads before rollout. Limits cannot be disabled.
+
+After headers reach the client, exceeding a limit produces a generic SSE error,
+never a successful `[DONE]`. The upstream response is closed and the original
+reservation is conservatively settled once, even if an earlier chunk reported usage.
+The provider circuit records failure. A deadline while awaiting headers instead
+returns generic HTTP 502 with conservative accounting. No provider response text is
+included in errors. Client cancellation retains the existing shielded accounting
+cleanup; it is not misclassified as a provider limit failure.
+
+Deadline checks occur before each upstream read and output chunk; pending upstream
+reads are interrupted at the remaining deadline. An independent watchdog also closes
+the upstream response and conservatively settles the reservation when downstream
+header/body sends are stalled. Normal completion, limit errors, cancellation and
+the watchdog share a one-shot settlement task, including provider-health updates.
+Limit errors settle before yielding an SSE error; successful completion settles
+before yielding `[DONE]`. Response closure runs independently of database settlement.
+
+The watchdog does not cancel the client's transport task. Ingress/server write
+timeouts remain necessary to bound downstream network lifetime. Shutdown drains
+retained watchdog/accounting tasks; a wholly unconsumed response can keep draining
+until its configured deadline. Configure termination grace periods accordingly.

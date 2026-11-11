@@ -26,7 +26,7 @@ Environment settings:
 - `CIRCUIT_FAILURE_THRESHOLD=3`: consecutive counted failure outcomes open a route.
 - `CIRCUIT_COOLDOWN_SECONDS=30`: minimum wait before a probe can be admitted.
 - `CIRCUIT_PROBE_SECONDS=150`: configured minimum probe lease. The effective lease
-  is `max(CIRCUIT_PROBE_SECONDS, PROVIDER_TIMEOUT_SECONDS + 30)`, so a 600-second
+  is `max(CIRCUIT_PROBE_SECONDS, PROVIDER_TIMEOUT_SECONDS + 30, PROVIDER_STREAM_DURATION_SECONDS + 30)`, so a 600-second
   provider timeout yields at least a 630-second lease. Size for expected request
   duration; an expired lease allows recovery after a crashed worker. Provider
   timeout is a read-idle timeout, not a total stream deadline. A request

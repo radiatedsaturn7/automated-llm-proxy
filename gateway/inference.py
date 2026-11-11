@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import time
 import logging
 
 import httpx
@@ -166,6 +167,24 @@ def response_headers(response, request_id):
     return headers
 
 
+class FinalizingStreamingResponse(StreamingResponse):
+    """Also finalize cancellations before the body generator has been entered."""
+    def __init__(self, *args, on_close, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.on_close = on_close
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self.on_close()
+
+
+async def wait_stream_deadline(deadline):
+    """Separate await point for the independent upstream resource watchdog."""
+    await asyncio.sleep(max(0, deadline - time.monotonic()))
+
+
 async def infer(request, endpoint):
     identity = await inference_identity(request)
     try:
@@ -205,9 +224,17 @@ async def infer(request, endpoint):
         raise
     client = request.app.state.upstream
     response = None
+    cfg = get_settings()
+    stream_deadline = time.monotonic() + cfg.provider_stream_duration_seconds if payload.get("stream") else None
     try:
         with LATENCY.labels(endpoint).time():
-            response = await client.send(client.build_request("POST", url, headers=headers, json=body), stream=True)
+            if stream_deadline is not None:
+                # Include waiting for response headers in the absolute deadline.
+                response = await asyncio.wait_for(
+                    client.send(client.build_request("POST", url, headers=headers, json=body), stream=True),
+                    timeout=max(0, stream_deadline - time.monotonic()))
+            else:
+                response = await client.send(client.build_request("POST", url, headers=headers, json=body), stream=True)
         if response.status_code >= 300:
             # Provider may have processed 5xx responses; keep conservative charge. Definitive 4xx release.
             await finish_request(request, response, reservation_id, model, provider, route,
@@ -218,26 +245,88 @@ async def infer(request, endpoint):
             raise HTTPException(429 if response.status_code == 429 else 502, "Provider rejected request",
                                 headers=response_headers(response, reservation_id))
         if payload.get("stream"):
-            translator = StreamTranslator(provider, model)
+            translator = StreamTranslator(provider, model, max_bytes=cfg.provider_stream_max_bytes,
+                                          max_events=cfg.provider_stream_max_events,
+                                          duration_seconds=cfg.provider_stream_duration_seconds, deadline=stream_deadline)
+
+            settlement = None
+            watchdog = None
+            deadline_expired = False
+
+            def cleanup_done(task):
+                request.app.state.accounting_tasks.discard(task)
+                if not task.cancelled() and task.exception() is not None:
+                    log.error("Stream cleanup failed; reservation requires reconciliation")
+
+            async def close_stream():
+                try:
+                    await asyncio.wait_for(response.aclose(), timeout=5)
+                except (httpx.HTTPError, TimeoutError):
+                    log.warning("Provider response cleanup failed")
+
+            async def settle_stream(usage=None, outcome=None):
+                nonlocal settlement
+                # No await between checking and assigning the one-shot task.
+                # Generator exit, error and independent watchdog share this arbiter.
+                if settlement is None:
+                    async def finish_stream():
+                        # Close upstream independently of potentially contended DB
+                        # settlement; neither operation waits for downstream sends.
+                        await asyncio.gather(
+                            close_stream(),
+                            finish_request(request, None, reservation_id, model, provider, route,
+                                           usage, health_ticket=health_ticket, outcome=outcome))
+                    settlement = asyncio.create_task(finish_stream())
+                    request.app.state.accounting_tasks.add(settlement)
+                    settlement.add_done_callback(cleanup_done)
+                    if watchdog is not None and watchdog is not asyncio.current_task():
+                        watchdog.cancel()
+                    if outcome is not None:
+                        REQUESTS.labels(endpoint, "success" if outcome == 'success' else "stream_error").inc()
+                await asyncio.shield(settlement)
+
+            async def deadline_watchdog():
+                nonlocal deadline_expired
+                try:
+                    await wait_stream_deadline(stream_deadline)
+                    deadline_expired = True
+                    await settle_stream(outcome='failure')
+                except asyncio.CancelledError:
+                    # Keep a shutdown snapshot that retained this watchdog waiting
+                    # for the winning settlement, including its response cleanup.
+                    await settle_stream()
+
+            # Start before returning StreamingResponse: even if headers or a body
+            # send stall, upstream and the budget reservation still have a deadline.
+            watchdog = asyncio.create_task(deadline_watchdog())
+            request.app.state.accounting_tasks.add(watchdog)
+            watchdog.add_done_callback(cleanup_done)
 
             async def stream():
                 completed = False
-                health_outcome = None
                 try:
+                    if deadline_expired:
+                        raise ValueError("Upstream stream duration exceeded")
                     async for chunk in translator.iterate(response):
+                        if deadline_expired:
+                            raise ValueError("Upstream stream duration exceeded")
+                        if chunk == b"data: [DONE]\n\n":
+                            # Commit actual completed usage before the final client
+                            # send can stall and race the resource watchdog.
+                            completed = translator.complete
+                            await settle_stream(translator.usage if completed else None,
+                                                'success' if completed else 'failure')
                         yield chunk
                     completed = translator.complete
-                    health_outcome = 'success' if completed else 'failure'
-                    REQUESTS.labels(endpoint, "success" if completed else "stream_error").inc()
-                except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
-                    health_outcome = 'failure'
-                    REQUESTS.labels(endpoint, "stream_error").inc()
+                except (httpx.HTTPError, httpx.StreamError, ValueError, TypeError, KeyError, AttributeError):
+                    # A blocked error send must not retain upstream/resources.
+                    await settle_stream(outcome='failure')
                     yield b'data: {"error":{"message":"Upstream stream interrupted","type":"upstream_error"}}\n\n'
                 finally:
-                    await finish_request(request, response, reservation_id, model, provider, route,
-                                         translator.usage if completed else None, health_ticket=health_ticket, outcome=health_outcome)
+                    await settle_stream(translator.usage if completed else None,
+                                        'success' if completed else None)
 
-            return StreamingResponse(stream(), media_type="text/event-stream", headers={
+            return FinalizingStreamingResponse(stream(), on_close=settle_stream, media_type="text/event-stream", headers={
                 **response_headers(response, reservation_id), "X-Accel-Buffering": "no"})
         chunks = []
         size = 0
@@ -274,7 +363,7 @@ async def infer(request, endpoint):
     except asyncio.CancelledError:
         await finish_request(request, response, reservation_id, model, provider, route)
         raise
-    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError, RecursionError):
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError, RecursionError, TimeoutError):
         await finish_request(request, response, reservation_id, model, provider, route,
                              health_ticket=health_ticket, outcome='failure')
         REQUESTS.labels(endpoint, "error").inc()

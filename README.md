@@ -65,6 +65,8 @@ uv run ruff check .
 - [Feature matrix, research and roadmap](docs/feature-matrix.md)
 - [Local relay and automatic access-token renewal](docs/local-relay.md)
 - [Deterministic evaluations](docs/evaluation.md)
+- [Opt-in model evaluation runner](docs/evaluation-runner.md)
+- [Database access paths and migration planning](docs/database-indexes.md)
 
 ## Important boundaries
 

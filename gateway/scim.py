@@ -259,6 +259,15 @@ def email(value):
         fail("userName must be an email address")
 
 
+async def mark_managed(session, user):
+    user.scim_managed = True
+    # SCIM takeover must not retain a password/session that bypasses federation.
+    password = await session.get(db.LocalPassword, user.id)
+    if password:
+        await session.delete(password)
+        await session.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user.id))
+
+
 @router.post("/Users", status_code=201)
 async def create_user(request: Request, identity: Identity = Depends(provisioning)):
     body = await payload(request, {"schemas", "userName", "active", "externalId"})
@@ -268,7 +277,7 @@ async def create_user(request: Request, identity: Identity = Depends(provisionin
     external_id = external(body.get("externalId"))
     async with db.transaction() as session:
         user = db.User(
-            email=name, enabled=body.get("active", True), role="member", scim_external_id=external_id
+            email=name, enabled=body.get("active", True), role="member", scim_external_id=external_id, scim_managed=True
         )
         session.add(user)
         await session.flush()
@@ -311,6 +320,7 @@ async def patch_user(resource_id: str, request: Request, identity: Identity = De
             fail("Resource not found", 404)
         if user.role == "admin":
             fail("Administrator identities must be managed through administration", 403)
+        await mark_managed(session, user)
         if "userName" in changes:
             user.email = changes["userName"]
         if "externalId" in changes:
@@ -334,6 +344,7 @@ async def disable_user(resource_id: str, identity: Identity = Depends(provisioni
             fail("Resource not found", 404)
         if user.role == "admin":
             fail("Cannot deprovision an administrator through SCIM", 403)
+        await mark_managed(session, user)
         user.enabled = False
         await session.execute(update(db.APIKey).where(db.APIKey.user_id == user.id).values(revoked=True))
         await session.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user.id))
@@ -363,9 +374,11 @@ async def set_members(session, group, members):
         fail("Administrator teams must be managed through administration", 403)
     changed = {u.id for u in current if u.id not in ids} | {u.id for u in users if u.team_id != group.id}
     for user in current:
+        await mark_managed(session, user)
         if user.id not in ids:
             user.team_id = None
     for user in users:
+        await mark_managed(session, user)
         user.team_id = group.id
     if changed:
         # Revoke, rather than relying only on team binding: remove/re-add must not revive keys.
@@ -429,6 +442,7 @@ async def replace_user(resource_id: str, request: Request, identity: Identity = 
             fail("Resource not found", 404)
         if user.role == "admin":
             fail("Administrator identities must be managed through administration", 403)
+        await mark_managed(session, user)
         user.email, user.enabled, user.scim_external_id = name, body.get("active", True), external_id
         if not user.enabled:
             await session.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user.id))

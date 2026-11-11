@@ -125,3 +125,21 @@ keys after pending-record cleanup; it is not an authentication secret. Run the
 ordinary migration job under a maintenance plan before enabling enrollment.
 No root credentials are backfilled, generated, or logged by migration. Disabling
 enrollment does not revoke already-issued agent keys; revoke them explicitly.
+
+## Revision 10: optional local authentication
+
+Adds digest-independent salted password hashes, bounded shared login throttle buckets,
+and a persistent managed-identity marker. Existing users are conservatively marked
+managed because historic SCIM origin cannot reliably be inferred from optional external
+IDs or retained audit history. Their API/SSO access is unchanged; fallback password
+accounts must be newly and explicitly created locally. No passwords are generated.
+See [local passwords](local-passwords.md) before enabling this default-off feature.
+
+## Revision 11: IdP session revocation
+
+Adds nullable IdP correlation fields/indexes and durable logout replay/tombstone records.
+All existing browser sessions are invalidated once: old rows cannot be safely correlated
+to an IdP notification. Users must sign in again after the upgrade. Existing API/agent
+keys retain their permissions, expiry and secrets. Back up and schedule the ordinary
+migration job before starting replicas with the new code; automatic downgrade is not
+supported.

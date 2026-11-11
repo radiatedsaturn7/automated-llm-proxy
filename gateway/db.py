@@ -39,6 +39,7 @@ class Team(Base):
 
 class User(Base):
     __tablename__ = "users"
+    scim_managed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     scim_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     email: Mapped[str] = mapped_column(String(320), unique=True)
@@ -204,11 +205,29 @@ class OIDCState(Base):
 class BrowserSession(Base):
     __tablename__ = "browser_sessions"
     __table_args__ = (Index("ix_browser_sessions_expiry_digest", "expires_at", "digest"),
-                      Index("ix_browser_sessions_user", "user_id"))
+                      Index("ix_browser_sessions_user", "user_id"),
+                      Index("ix_browser_sessions_oidc_sid", "oidc_issuer", "oidc_sid"),
+                      Index("ix_browser_sessions_oidc_subject", "oidc_issuer", "oidc_subject"))
     digest: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     csrf: Mapped[str] = mapped_column(String(128))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    oidc_issuer: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    oidc_subject: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    oidc_sid: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class OIDCLogoutReplay(Base):
+    __tablename__ = "oidc_logout_replays"
+    __table_args__ = (Index("ix_oidc_logout_replays_issuer", "issuer"),)
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    issuer: Mapped[str] = mapped_column(String(512))
+    subject: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    sid: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    issued_at: Mapped[int] = mapped_column(Integer)
 
 
 class PromptTemplate(Base):
@@ -310,3 +329,16 @@ async def lock_policy_subjects(session, team_id, user_id, key_id):
                                        .with_for_update().execution_options(populate_existing=True))
         rows.append(row)
     return tuple(rows)
+
+
+class LocalPassword(Base):
+    __tablename__ = "local_passwords"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(256))
+
+
+class LoginThrottle(Base):
+    __tablename__ = "login_throttles"
+    bucket: Mapped[str] = mapped_column(String(32), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer)

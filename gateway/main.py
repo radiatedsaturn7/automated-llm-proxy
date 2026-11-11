@@ -13,6 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from . import local_auth
 from . import account, admin, agent_rotation, auth, comparisons, db, enrollment, exports, inference, prompts, responses, scim, teams
 from .config import get_settings
 from .observability import ObservabilityMiddleware
@@ -76,6 +77,7 @@ app.include_router(account.router)
 app.include_router(scim.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
+app.include_router(local_auth.router)
 app.include_router(agent_rotation.router)
 app.include_router(enrollment.router)
 app.include_router(inference.router)

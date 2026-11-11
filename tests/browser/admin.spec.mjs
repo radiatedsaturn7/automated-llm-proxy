@@ -126,6 +126,30 @@ test('fresh installation: real HTTP, bootstrap, administration, scoped keys and 
   await page.getByRole('button', { name: 'Archive template', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Append immutable version', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Restore template', exact: true })).toBeVisible();
+  // One existing bootstrap credential exercises the actual delegated-team UI/API.
+  const teamPage = await page.context().newPage();
+  teamPage.on('pageerror', error => errors.push(error.message));
+  await teamPage.goto('/team-admin');
+  await teamPage.locator('#team-token').fill(adminKey);
+  await teamPage.getByRole('button', {name:'Connect',exact:true}).click();
+  await expect(teamPage.locator('#team-workspace')).toBeVisible();
+  await teamPage.selectOption('#team-select', team.id);
+  await expect(teamPage.locator('#team-status')).toHaveText('Team loaded.');
+  await teamPage.locator('#member-id').fill(user.id);
+  await teamPage.getByRole('button', {name:'Save membership',exact:true}).click();
+  await expect(teamPage.locator('#team-status')).toHaveText('Change saved.');
+  await teamPage.locator('#key-user').fill(user.id);
+  await teamPage.locator('#key-name').fill('Team UI inference key');
+  await teamPage.getByRole('button', {name:'Issue key',exact:true}).click();
+  await expect(teamPage.locator('#team-secret-dialog')).toBeVisible();
+  expect(Boolean(await teamPage.locator('#team-secret').inputValue())).toBe(true);
+  await teamPage.getByRole('button', {name:'Close and clear'}).click();
+  await expect(teamPage.locator('#team-secret')).toHaveValue('');
+  await expect(teamPage.locator('#team-keys')).toContainText('Team UI inference key');
+  await teamPage.getByRole('button', {name:'Sign out and clear'}).click();
+  await expect(teamPage.locator('#team-workspace')).toBeHidden();
+  expect(await teamPage.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
+  await teamPage.close();
   // Durable credentials must not be stashed in browser storage.
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();

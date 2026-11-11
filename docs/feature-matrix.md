@@ -5,9 +5,9 @@ This is a working foundation under active development, **not** a fully enterpris
 | Capability | Implemented scope | Important boundary / next work |
 |---|---|---|
 | Stateless replicas | External PostgreSQL-backed identity, policy, sessions and accounting | Local SQLite is development-only; external state is essential |
-| Users and teams | Administrator/member roles; user and team budgets | One team per user; no delegated team-admin or arbitrary RBAC |
+| Users and teams | Primary and explicit secondary memberships; scoped team administrators; shared user and selected-team budgets | Not arbitrary RBAC; SCIM/OIDC maintain primary membership only; delegated API keys cannot exceed caller limits |
 | Virtual credentials | Explicit inference/admin/account/provisioning permissions, expiry, revocation, rotation, model scopes and rate allowances | Permissions cannot elevate user role; rotation preserves authorization and expiry |
-| Provider abstraction | OpenAI-compatible, Azure OpenAI v1 and Anthropic text adapters | Not full vendor API parity; validate supported request types |
+| Provider abstraction | OpenAI-compatible, Azure OpenAI v1, Anthropic and native Gemini text adapters | Not full vendor API parity; validate supported request types |
 | Spending control | Shared reservations and UTC monthly accounting | Prices operator-maintained; crash reconciliation required; not invoice reconciliation |
 | SSO | OIDC with explicit group mapping and browser sessions | SCIM Users/Groups provisioning subset and explicit offboarding; no SAML, local passwords or IdP certification |
 | Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Member portal manages own existing credentials; no arbitrary delegated team-admin roles |
@@ -18,7 +18,7 @@ This is a working foundation under active development, **not** a fully enterpris
 | Monitoring | Health/readiness and metrics integration in application/deployment | Correlation IDs, bounded route metrics, structured metadata logs, example dashboards/alerts; SLO ownership remains operator work |
 | Advanced reliability | DB-shared per-model circuits, next-request routing, leased half-open probes and stale-completion fencing | No same-request replay, automatic model equivalence, exactly-once inference or failover SLA |
 | Extensibility | Explicit source-level provider adapters | No untrusted plugin loader or isolation sandbox |
-| Governance | Model scopes and privileged provider configuration | No DLP, moderation suite, compliance attestation or data residency enforcement |
+| Governance | Model scopes, privileged provider configuration and opt-in inbound block/redact heuristics | Fixed reviewed detectors, no output scanning, complete DLP coverage, moderation suite, compliance attestation or data residency enforcement |
 
 ## Verification status
 

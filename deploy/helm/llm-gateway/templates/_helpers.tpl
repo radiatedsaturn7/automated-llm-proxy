@@ -68,6 +68,14 @@ env:
     value: {{ .Values.database.migrationStatementTimeoutMs | quote }}
   - name: DB_MIGRATION_LOCK_TIMEOUT_MS
     value: {{ .Values.database.migrationLockTimeoutMs | quote }}
+  - name: GUARDRAILS_ENABLED
+    value: {{ .Values.guardrails.enabled | quote }}
+  - name: GUARDRAILS_ACTION
+    value: {{ .Values.guardrails.action | quote }}
+  - name: GUARDRAILS_DETECTORS
+    value: {{ .Values.guardrails.detectors | toJson | quote }}
+  - name: GUARDRAILS_MAX_CHARACTERS
+    value: {{ .Values.guardrails.maxCharacters | quote }}
 {{- with .Values.extraEnv }}
   {{- toYaml . | nindent 2 }}
 {{- end }}

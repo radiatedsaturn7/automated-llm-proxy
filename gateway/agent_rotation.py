@@ -32,7 +32,7 @@ async def active(session, key):
     if not key or key.kind != "agent" or key.revoked or aware(key.expires_at) <= db.now():
         raise HTTPException(401, "Invalid agent credential")
     user = await session.get(db.User, key.user_id)
-    if not user or not user.enabled or user.team_id != key.team_id:
+    if not await db.active_membership(session, user, key.team_id):
         raise HTTPException(401, "Agent identity unavailable")
     if key.team_id:
         team = await session.get(db.Team, key.team_id)

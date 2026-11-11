@@ -10,7 +10,7 @@ Apache-2.0 LLM gateway with a stateless application tier and external SQL policy
 
 - OpenAI-compatible text chat, SSE streaming, embeddings and model discovery; Azure OpenAI v1 and native Anthropic text-chat adapters.
 - Explicit provider/model aliases and prices, encrypted provider credentials, model allowlists and priority routing.
-- Users, one team per user, monthly USD budgets, concurrent reservations and per-key request/token admission limits.
+- Users, primary and explicit secondary teams, scoped team administration, monthly USD budgets, concurrent reservations and per-key request/token admission limits.
 - Hashed API credentials with explicit inference/admin/account/provisioning permissions, expiration and revocation; rotation preserves scope and expiry.
 - OIDC SSO with PKCE, verified identity tokens, nested group mappings, bounded metadata/JWKS caching, configurable sessions and CSRF protection; explicit identity linking and session revocation.
 - A bounded SCIM Users/Groups subset, administrator console and member self-service portal.
@@ -59,6 +59,8 @@ uv run ruff check .
 - [Observability and monitoring](docs/observability.md)
 - [Provider compatibility](docs/providers.md)
 - [SCIM provisioning subset](docs/provisioning.md)
+- [Multi-team delegation and team administration](docs/team-delegation.md)
+- [Opt-in inbound DLP and source extension boundaries](docs/guardrails.md)
 - [Operational cleanup and recovery](docs/operations.md)
 - [Architecture and accounting semantics](docs/architecture.md)
 - [Security model and production checklist](docs/security.md)

@@ -80,8 +80,8 @@ async def identify(request: Request, allow_session=False):
             raise HTTPException(401, "Bearer credential required")
         if user is None or not user.enabled:
             raise HTTPException(401, "User disabled")
-        team_id = key.team_id if key else user.team_id
-        if key and team_id != user.team_id:
+        team_id = key.team_id if key else None
+        if key and not await db.active_membership(session, user, team_id):
             raise HTTPException(401, "Credential team no longer matches user")
         if team_id:
             team = await session.get(db.Team, team_id)

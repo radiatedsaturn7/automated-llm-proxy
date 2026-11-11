@@ -222,3 +222,21 @@ async def test_v7_index_upgrade_preserves_accounting(migration_engine):
         assert (await conn.execute(select(db.Usage.cost_micros))).scalars().all() == [17]
         assert (await conn.execute(select(db.Reservation.amount_micros))).scalars().all() == [100]
     assert await migrate() == HEAD
+
+
+async def test_v8_preserves_legacy_primary_without_privilege_backfill(migration_engine):
+    from datetime import datetime, timezone
+    from gateway.migrations import v0007
+    async with migration_engine.begin() as conn:
+        await conn.run_sync(v0007.metadata.create_all)
+        await conn.execute(v0007.metadata.tables['policy_lock'].insert().values(id=1))
+        await conn.run_sync(version_metadata.create_all)
+        for number in range(1, 8):
+            await conn.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
+        await conn.execute(v0007.metadata.tables['teams'].insert().values(id='primary', name='old', enabled=True))
+        await conn.execute(v0007.metadata.tables['users'].insert().values(
+            id='legacy', email='old@example.com', team_id='primary', role='member', enabled=True))
+    assert await migrate() == HEAD
+    async with migration_engine.connect() as conn:
+        assert (await conn.execute(select(db.User.team_id))).scalars().all() == ['primary']
+        assert (await conn.execute(select(db.TeamMembership))).all() == []

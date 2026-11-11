@@ -104,3 +104,10 @@ database:
   lockTimeoutMs: 5000
   migrationStatementTimeoutMs: 0
   migrationLockTimeoutMs: 0
+
+# Heuristic inbound content inspection. No output scanning/compliance guarantee.
+guardrails:
+  enabled: false
+  action: block
+  detectors: [secrets, private_key]
+  maxCharacters: 262144

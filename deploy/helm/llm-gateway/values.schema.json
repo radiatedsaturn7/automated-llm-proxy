@@ -218,6 +218,48 @@
           "maximum": 86400000
         }
       }
+    },
+    "guardrails": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "action",
+        "detectors",
+        "maxCharacters"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "block",
+            "redact"
+          ]
+        },
+        "detectors": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "secrets",
+              "private_key",
+              "email",
+              "us_ssn",
+              "payment_card"
+            ]
+          }
+        },
+        "maxCharacters": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576
+        }
+      }
     }
   }
 }

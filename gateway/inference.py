@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from prometheus_client import Counter, Histogram
 from sqlalchemy import select
 
-from . import db, policy, provider_health
+from . import db, guardrails, policy, provider_health
 from .config import get_settings
 from .providers import StreamTranslator, response_headers, translate_response, upstream_request
 from .security import inference_identity
@@ -145,6 +145,17 @@ async def infer(request, endpoint):
     model = payload["model"]
     if identity.key.allowed_models and model not in identity.key.allowed_models:
         raise HTTPException(403, "Model not allowed")
+    try:
+        guarded = guardrails.preflight(payload, "embeddings" if endpoint == "embeddings" else "chat", get_settings())
+    except guardrails.GuardrailRejected as rejected:
+        async with db.transaction(inference=True) as session:
+            await db.audit(session, identity.user.id, "guardrail.block", reason=rejected.reason,
+                           detector_counts=rejected.counts)
+        raise HTTPException(403, "Inbound content rejected by gateway policy") from None
+    payload = guarded.payload
+    if guarded.counts:
+        async with db.transaction(inference=True) as session:
+            await db.audit(session, identity.user.id, "guardrail.redact", detector_counts=guarded.counts)
     # Choose one healthy route before reservation/dispatch. Never retry this request.
     provider, health_ticket = await provider_health.choose(model, endpoint)
     route = provider.models[model]
@@ -204,7 +215,7 @@ async def infer(request, endpoint):
         data = json.loads(b"".join(chunks))
         if not isinstance(data, dict):
             raise ValueError("Provider response not an object")
-        data = translate_response(provider, data, model)
+        data = translate_response(provider, data, model, endpoint=endpoint, payload=payload)
         await finish_request(request, response, reservation_id, model, provider, route, data.get("usage"),
                              health_ticket=health_ticket, outcome='success')
         REQUESTS.labels(endpoint, "success").inc()

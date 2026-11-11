@@ -13,7 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from . import account, admin, agent_rotation, auth, comparisons, db, exports, inference, prompts, scim
+from . import account, admin, agent_rotation, auth, comparisons, db, exports, inference, prompts, scim, teams
 from .config import get_settings
 from .observability import ObservabilityMiddleware
 
@@ -67,6 +67,7 @@ class BodyLimitMiddleware:
 
 app = FastAPI(title="Thunderbolt", version="0.1.0", lifespan=lifespan)
 app.add_middleware(BodyLimitMiddleware)
+app.include_router(teams.router)
 app.include_router(comparisons.router)
 app.include_router(exports.router)
 app.include_router(prompts.router)
@@ -148,3 +149,8 @@ app.add_middleware(ObservabilityMiddleware)
 @app.get("/portal", include_in_schema=False)
 async def user_portal():
     return FileResponse(Path(__file__).parent / "static" / "portal.html")
+
+
+@app.get("/team-admin", include_in_schema=False)
+async def team_admin_page():
+    return FileResponse(Path(__file__).parent / "static" / "teams.html")

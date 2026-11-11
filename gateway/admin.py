@@ -156,9 +156,10 @@ async def create_key(body: schemas.KeyCreate, identity: Identity = Depends(admin
         user = await s.get(db.User, body.user_id)
         if not user or not user.enabled:
             raise HTTPException(404, "Active user not found")
-        if body.team_id is not None and body.team_id != user.team_id:
+        team_id = body.team_id if body.team_id is not None else user.team_id
+        if not await db.active_membership(s, user, team_id):
             raise HTTPException(400, "Key team must match user team")
-        raw, key = new_key(user.id, user.team_id, body.name, body.expires_in_days, body.kind,
+        raw, key = new_key(user.id, team_id, body.name, body.expires_in_days, body.kind,
                            permissions=body.permissions, allowed_models=body.allowed_models, rpm=body.rpm, tpm=body.tpm)
         s.add(key)
         await s.flush()
@@ -184,6 +185,8 @@ async def rotate_key(key_id: str, identity: Identity = Depends(admin)):
         if not key or key.revoked:
             raise HTTPException(404, "Active key not found")
         from .security import aware
+        if not await db.active_membership(s, await s.get(db.User, key.user_id), key.team_id):
+            raise HTTPException(403, "Membership unavailable")
         if aware(key.expires_at) <= db.now():
             raise HTTPException(400, "Cannot rotate expired key")
         raw, replacement = new_key(key.user_id, key.team_id, key.name, kind=key.kind,

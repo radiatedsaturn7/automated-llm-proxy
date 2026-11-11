@@ -46,7 +46,7 @@ class ModelRoute(Strict):
 
 class ProviderCreate(Strict):
     name: str = Field(min_length=1, max_length=120)
-    kind: Literal["openai", "anthropic", "azure_openai"] = "openai"
+    kind: Literal["openai", "anthropic", "azure_openai", "gemini"] = "openai"
     base_url: str = Field(max_length=2048)
     api_key: str = Field(min_length=1, max_length=8192)
     models: dict[str, ModelRoute]
@@ -82,8 +82,8 @@ class KeyCreate(Strict):
     team_id: str | None = None
     expires_in_days: int = Field(default=30, ge=1, le=365)
     kind: Literal["api", "agent"] = "api"
-    permissions: list[Literal["inference", "admin", "account", "provisioning"]] = Field(
-        default_factory=lambda: ["inference"], min_length=1, max_length=4)
+    permissions: list[Literal["inference", "admin", "account", "provisioning", "team_admin"]] = Field(
+        default_factory=lambda: ["inference"], min_length=1, max_length=5)
 
     @model_validator(mode="after")
     def validate_permissions(self):
@@ -109,7 +109,7 @@ class EvaluationRequest(Strict):
 
 
 class IdentityLink(Strict):
-    issuer: str = Field(min_length=1, max_length=400)
+    issuer: str = Field(min_length=1, max_length=500)
     subject: str = Field(min_length=1, max_length=255)
     identity_verified: Literal[True]
 

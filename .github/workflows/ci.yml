@@ -65,8 +65,11 @@ jobs:
           cache: npm
           cache-dependency-path: tests/browser/package-lock.json
       - run: npm ci --prefix tests/browser
-      - run: npx playwright install --with-deps chromium
+      # Ubuntu 24.04 runners already include Chromium's shared libraries.
+      # Avoid apt's optional font downloads; browser startup still validates dependencies.
+      - run: npx playwright install chromium
         working-directory: tests/browser
+        timeout-minutes: 5
       - name: Generate disposable installation secrets
         shell: bash
         run: |
@@ -94,10 +97,12 @@ jobs:
       - name: Show service status and diagnostics on failure
         if: failure()
         run: |
-          docker compose ps -a
-          docker compose logs --no-color --tail=100
+          if [ -f .env ]; then
+            docker compose ps -a
+            docker compose logs --no-color --tail=100
+          fi
       - name: Remove disposable stack and secrets
         if: always()
         run: |
-          docker compose down --volumes --remove-orphans || true
+          if [ -f .env ]; then docker compose down --volumes --remove-orphans || true; fi
           rm -f .env

@@ -48,3 +48,19 @@ resurrect revoked credentials or lose usage records: reconcile provider billing 
 revocations before reopening traffic. The runner's `downgrade()` refuses without
 mutating schema. Tests cover fresh/idempotent/concurrent upgrades, explicit legacy
 adoption, drift/newer-version refusal and non-destructive downgrade refusal.
+
+## Revision 2: SCIM external identifiers
+
+Revision 2 adds nullable `scim_external_id VARCHAR(255)` columns and unique indexes
+to `users` and `teams`. Existing rows retain their IDs, memberships, credentials,
+and data; their external identifier initially remains null. Multiple null IDs are
+allowed. Non-null IDs are unique within Users and within Groups independently.
+
+Run the standard migration command for a versioned v1 installation. An original
+unversioned v1 installation still requires `--adopt-v1`: its v1 structure is
+validated before adoption, then revision 2 runs. Both operations share one database
+transaction. A pre-existing unversioned v2/custom schema is intentionally not
+implicitly adopted. Index creation is transactional but not concurrent: schedule
+an appropriate maintenance window on populated installations. The test suite
+checks v1 data preservation, null handling, uniqueness and drift refusal before
+any v2 alteration.

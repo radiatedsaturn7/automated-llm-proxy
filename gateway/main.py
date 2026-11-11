@@ -13,8 +13,9 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from . import admin, auth, db, inference
+from . import admin, auth, db, inference, scim
 from .config import get_settings
+from .observability import ObservabilityMiddleware
 
 
 @asynccontextmanager
@@ -64,8 +65,9 @@ class BodyLimitMiddleware:
         await self.app(scope, replay, send)
 
 
-app = FastAPI(title="Automated LLM Proxy", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Thunderbolt", version="0.1.0", lifespan=lifespan)
 app.add_middleware(BodyLimitMiddleware)
+app.include_router(scim.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(inference.router)
@@ -132,3 +134,7 @@ async def metrics(request: Request):
 @app.get("/admin", include_in_schema=False)
 async def admin_page():
     return FileResponse(Path(__file__).parent / "static" / "index.html")
+
+
+# Registered last so body limits, auth errors and security-header middleware are observed.
+app.add_middleware(ObservabilityMiddleware)

@@ -2,6 +2,7 @@ import asyncio
 import ipaddress
 import json
 import socket
+import re
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -28,15 +29,28 @@ async def validate_base_url(value):
 def upstream_request(provider, route, payload, endpoint):
     body = dict(payload)
     body["model"] = route["upstream_model"]
-    if provider.kind == "openai":
-        headers = {"Authorization": "Bearer " + decrypt(provider.encrypted_key), "Content-Type": "application/json"}
+    if provider.kind in {"openai", "azure_openai"}:
+        headers = {"Content-Type": "application/json"}
+        credential = decrypt(provider.encrypted_key)
+        if provider.kind == "azure_openai":
+            # Azure OpenAI v1: base_url ends /openai/v1; model is deployment name.
+            headers["api-key"] = credential
+        else:
+            headers["Authorization"] = "Bearer " + credential
         if body.get("stream"):
             body["stream_options"] = {"include_usage": True}
         return provider.base_url + "/" + endpoint, headers, body
+    if provider.kind != "anthropic":
+        raise HTTPException(400, "Unsupported provider adapter")
     if endpoint != "chat/completions":
         raise HTTPException(400, "This provider supports chat only")
-    if body.get("tools") or body.get("tool_choice") or body.get("response_format"):
+    unsupported = {"tools", "tool_choice", "response_format", "seed", "presence_penalty", "frequency_penalty", "parallel_tool_calls", "max_completion_tokens", "reasoning_effort", "stream_options"}
+    if set(payload) & unsupported:
+        raise HTTPException(400, "Unsupported Anthropic request parameters")
+    if any(not isinstance(m.get("content"), str) or "tool_calls" in m or m.get("role") == "tool" for m in body["messages"]):
         raise HTTPException(400, "Anthropic adapter supports text chat only in this release")
+    if "temperature" in payload and "top_p" in payload:
+        raise HTTPException(400, "Choose temperature or top_p for Anthropic")
     system = []
     messages = []
     for message in body["messages"]:
@@ -52,15 +66,34 @@ def upstream_request(provider, route, payload, endpoint):
         body["system"] = "\n\n".join(system)
     for field in ["temperature", "top_p", "stop"]:
         if field in payload:
-            body["stop_sequences" if field == "stop" else field] = payload[field]
+            value = payload[field]
+            body["stop_sequences" if field == "stop" else field] = [value] if field == "stop" and isinstance(value, str) else value
     return provider.base_url + "/messages", {"x-api-key": decrypt(provider.encrypted_key),
             "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, body
 
 
+def response_headers(response, request_id):
+    """Forward opaque correlation IDs, never arbitrary upstream headers or error text."""
+    headers = {"X-Reservation-ID": request_id, "Cache-Control": "no-store"}
+    for name in ("x-request-id", "request-id", "apim-request-id"):
+        value = response.headers.get(name, "")
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value):
+            headers["X-Provider-Request-ID"] = value
+            break
+    return headers
+
+
 def translate_response(provider, data, model):
-    if provider.kind == "openai":
+    if data.get("error"):
+        raise ValueError("Provider returned error object")
+    if provider.kind in {"openai", "azure_openai"}:
         return data
-    content = "".join(item.get("text", "") for item in data.get("content", []) if item.get("type") == "text")
+    blocks = data.get("content", [])
+    if not isinstance(blocks, list) or any(not isinstance(item, dict) or item.get("type") != "text" or not isinstance(item.get("text"), str) for item in blocks):
+        raise ValueError("Unsupported Anthropic response content")
+    if data.get("stop_reason") not in {None, "end_turn", "stop_sequence", "max_tokens"}:
+        raise ValueError("Unsupported Anthropic stop reason")
+    content = "".join(item["text"] for item in blocks)
     usage = data.get("usage")
     usage = usage if isinstance(usage, dict) else {}
     input_tokens, output_tokens = usage.get("input_tokens"), usage.get("output_tokens")
@@ -84,7 +117,7 @@ class StreamTranslator:
             raise ValueError("Invalid SSE event")
         if event.get("error"):
             raise ValueError("Provider stream failed")
-        if self.provider.kind == "openai":
+        if self.provider.kind in {"openai", "azure_openai"}:
             if isinstance(event, dict) and event.get("usage"):
                 self.usage = event["usage"]
             return event
@@ -99,7 +132,10 @@ class StreamTranslator:
             self.input_tokens = message.get("usage", {}).get("input_tokens")
             delta = {"role": "assistant", "content": ""}
         elif kind == "content_block_delta":
-            delta = {"content": event.get("delta", {}).get("text", "")}
+            content_delta = event.get("delta", {})
+            if content_delta.get("type") not in {None, "text_delta"} or not isinstance(content_delta.get("text"), str):
+                raise ValueError("Unsupported Anthropic stream content")
+            delta = {"content": content_delta["text"]}
         elif kind == "message_delta":
             out = event.get("usage", {}).get("output_tokens")
             self.usage = {"prompt_tokens": self.input_tokens, "completion_tokens": out,

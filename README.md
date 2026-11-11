@@ -31,7 +31,7 @@ export BOOTSTRAP_TOKEN="$(uv run python -c 'import secrets; print(secrets.token_
 export DATABASE_URL='sqlite+aiosqlite:///./gateway.db'
 export PUBLIC_URL='http://localhost:8080'
 uv run python -m gateway.migrate
-uv run uvicorn gateway.main:app --host 127.0.0.1 --port 8080 --no-proxy-headers
+uv run python -m gateway.cli --host 127.0.0.1 --port 8080
 ```
 
 Open http://localhost:8080/admin. Use the bootstrap token once to create the first administrator and receive a seven-day admin key. Store that key securely; do not use the bootstrap secret as an API credential. Keep encryption/signing keys stable across restarts and replicas. Create a team/user, configure a provider with a model alias and per-million token USD prices, then create a restricted user key. Provider calls incur your provider's charges.
@@ -47,6 +47,8 @@ uv run ruff check .
 
 - [Deployment, Compose, Helm, Terraform](deploy/README.md)
 - [Versioned migrations and legacy adoption](docs/migrations.md)
+- [Provider compatibility](docs/providers.md)
+- [SCIM provisioning subset](docs/provisioning.md)
 - [Operational cleanup and recovery](docs/operations.md)
 - [Architecture and accounting semantics](docs/architecture.md)
 - [Security model and production checklist](docs/security.md)
@@ -56,9 +58,9 @@ uv run ruff check .
 
 ## Important boundaries
 
-Budgets are admission controls using conservative reservations and provider-reported usage, **not a contractual hard billing cap**. Configure accurate prices and upstream account limits. Interrupted/unknown outcomes remain conservatively charged; reconcile only after checking provider billing. Token admission is estimated. The policy lock serializes accounting for correctness and will limit throughput; benchmark before scaling. No automatic retries after dispatch, to avoid duplicate billing. Priority routing is not health-aware failover.
+Budgets are admission controls using conservative reservations and provider-reported usage, **not a contractual hard billing cap**. Configure accurate prices and upstream account limits. Interrupted/unknown outcomes remain conservatively charged; reconcile only after checking provider billing. Token admission is estimated. Inference uses shared coordination and deterministic team/user/key row locks; unrelated teams can proceed concurrently. Same-team budget admission still serializes and must be benchmarked before scaling. No automatic retries after dispatch, to avoid duplicate billing. Priority routing is not health-aware failover.
 
-OIDC groups are refreshed on login, not continuously. Sessions last up to eight hours; disable a user for immediate gateway revocation. No built-in password authentication, SAML, SCIM, device authorization, credential-vault rotation, arbitrary plugin execution, multimodal adapter, distributed cache, semantic routing, or LLM-as-judge evaluation is claimed. The relay renews gateway access tokens; its bootstrap agent credential still requires secure provisioning and eventual renewal.
+OIDC groups are refreshed on login, not continuously. Sessions last up to eight hours; disable a user for immediate gateway revocation. No built-in password authentication, SAML, full SCIM interoperability certification, device authorization, credential-vault rotation, arbitrary plugin execution, multimodal adapter, distributed cache, semantic routing, or LLM-as-judge evaluation is claimed. The relay renews gateway access tokens; its bootstrap agent credential still requires secure provisioning and eventual renewal.
 
 Schema changes use serialized versioned migrations. Databases created by the initial release require an explicit, validated `--adopt-v1` step after backup; see the migration guide. HA app replicas do not create an HA database. External TLS, database HA/backups, secret management, egress controls, billing/audit archival, load/chaos tests, and an independent security review remain operator requirements. Dependency versions are recorded in `uv.lock`; container runtime packages use hashed `requirements.lock`.
 

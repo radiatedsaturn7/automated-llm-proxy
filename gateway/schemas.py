@@ -46,7 +46,7 @@ class ModelRoute(Strict):
 
 class ProviderCreate(Strict):
     name: str = Field(min_length=1, max_length=120)
-    kind: Literal["openai", "anthropic"] = "openai"
+    kind: Literal["openai", "anthropic", "azure_openai"] = "openai"
     base_url: str = Field(max_length=2048)
     api_key: str = Field(min_length=1, max_length=8192)
     models: dict[str, ModelRoute]

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Integer, MetaData, Table, inspect, select, text
 
 from . import db
-from .migrations import HEAD, REVISIONS, v0001
+from .migrations import HEAD, REVISIONS, v0001, v0002
 
 version_metadata = MetaData()
 versions = Table("gateway_schema_versions", version_metadata,
@@ -35,12 +35,19 @@ def expected_server_default(connection, table, column, actual_default):
 
 
 def validate_v1(connection):
-    """Refuse adoption of partial or divergent schema, never guess from table names."""
+    validate_schema(connection, v0001.Base.metadata)
+
+
+def validate_head(connection):
+    validate_schema(connection, v0002.metadata)
+
+
+def validate_schema(connection, expected):
+    """Refuse partial or divergent schema, never guess from table names."""
     inspector = inspect(connection)
-    expected = v0001.Base.metadata
     found = set(inspector.get_table_names()) - {versions.name}
     if found != set(expected.tables):
-        raise MigrationError("Schema table set does not match v1; manual migration required")
+        raise MigrationError("Schema table set does not match revision; manual migration required")
     for name, table in expected.tables.items():
         actual = {c["name"]: c for c in inspector.get_columns(name)}
         if set(actual) != set(table.columns.keys()):
@@ -91,13 +98,13 @@ def _upgrade(connection, adopt_v1=False):
         raise MigrationError("Unknown or noncontiguous schema history; use matching application release")
     if not applied and set(inspect(connection).get_table_names()) != {versions.name}:
         raise MigrationError("Schema exists without revision history; refusing partial initialization")
+    if applied:
+        validate_schema(connection, v0001.Base.metadata if applied[-1] == 1 else v0002.metadata)
     for number, revision in REVISIONS:
         if number not in applied:
             revision.upgrade(connection)
             connection.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
-    # Current head is v1. Later revisions must supply their own head validation.
-    if HEAD == 1:
-        validate_v1(connection)
+    validate_head(connection)
     return HEAD
 
 

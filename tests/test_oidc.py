@@ -19,6 +19,7 @@ async def oidc(client, monkeypatch):
     monkeypatch.setenv("OIDC_CLIENT_SECRET", "idp-secret")
     monkeypatch.setenv("OIDC_GROUP_MAPPING", '{"operators":{"role":"admin"}}')
     get_settings.cache_clear()
+    auth.clear_oidc_cache()
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
     jwk.update(kid="signing-key", use="sig", alg="RS256")
@@ -31,7 +32,7 @@ async def oidc(client, monkeypatch):
                 "authorization_endpoint": "https://id.example/authorize", "token_endpoint": "https://id.example/token",
                 "jwks_uri": "https://id.example/keys"})
         if request.url.path == "/keys":
-            return httpx.Response(200, json={"keys": [jwk]})
+            return httpx.Response(200, json={"keys": control.get("jwks", [jwk])})
         if request.url.path == "/token":
             form = parse_qs(request.content.decode())
             assert form["client_secret"] == ["idp-secret"]
@@ -40,7 +41,7 @@ async def oidc(client, monkeypatch):
                       "exp": int(time.time()) + 300, "sub": "subject-1", "nonce": control["nonce"],
                       "email": control["email"], "email_verified": True, "groups": ["operators"]}
             claims.update(control.get("claims", {}))
-            return httpx.Response(200, json={"id_token": jwt.encode(claims, key, algorithm="RS256", headers={"kid": "signing-key"})})
+            return httpx.Response(200, json={"id_token": jwt.encode(claims, control.get("signing_key", key), algorithm="RS256", headers={"kid": control.get("kid", "signing-key")})})
         pytest.fail(f"Unexpected IdP path {request.url.path}")
 
     monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **kwargs: original_client(
@@ -99,3 +100,43 @@ async def test_oidc_state_requires_matching_browser_cookie(client, oidc):
     state = await start(client, oidc)
     client.cookies.clear()
     assert (await client.get("/auth/oidc/callback", params={"state": state, "code": "code"})).status_code == 400
+
+
+async def test_nested_group_claim_and_bounded_session(client, oidc, monkeypatch):
+    from datetime import timedelta
+    from sqlalchemy import select
+    from gateway import db
+    from gateway.security import aware
+    monkeypatch.setenv('OIDC_GROUP_CLAIM', 'realm_access.roles')
+    monkeypatch.setenv('OIDC_SESSION_SECONDS', '300')
+    get_settings.cache_clear()
+    oidc['claims'] = {'groups': [], 'realm_access': {'roles': ['operators']}}
+    state = await start(client, oidc)
+    response = await client.get('/auth/oidc/callback', params={'state': state, 'code': 'code'})
+    assert response.status_code == 303, response.text
+    assert 'Max-Age=300' in response.headers['set-cookie']
+    async with db.transaction() as s:
+        session = await s.scalar(select(db.BrowserSession))
+        assert 295 <= (aware(session.expires_at) - db.now()).total_seconds() <= 300
+        session.expires_at = db.now() - timedelta(seconds=1)
+    assert not (await client.get('/auth/session')).json()['authenticated']
+
+
+async def test_nested_group_nonobject_rejected(client, oidc, monkeypatch):
+    monkeypatch.setenv('OIDC_GROUP_CLAIM', 'realm_access.roles')
+    get_settings.cache_clear()
+    oidc['claims'] = {'realm_access': ['operators']}
+    state = await start(client, oidc)
+    assert (await client.get('/auth/oidc/callback', params={'state': state, 'code': 'code'})).status_code == 403
+
+
+async def test_new_signing_kid_refreshes_cached_jwks(client, oidc):
+    state = await start(client, oidc)
+    assert (await client.get('/auth/oidc/callback', params={'state': state, 'code': 'first'})).status_code == 303
+    rotated = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(rotated.public_key()))
+    jwk.update(kid='rotated-key', use='sig', alg='RS256')
+    oidc.update(signing_key=rotated, kid='rotated-key', jwks=[jwk])
+    state = await start(client, oidc)
+    response = await client.get('/auth/oidc/callback', params={'state': state, 'code': 'second'})
+    assert response.status_code == 303, response.text

@@ -1,0 +1,31 @@
+groups:
+  - name: thunderbolt
+    rules:
+      - alert: ThunderboltTargetDown
+        expr: up{job="thunderbolt"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Thunderbolt scrape target is unavailable
+          description: Check pod health, routing and the metrics credential before assuming inference is down.
+      - alert: ThunderboltHttpErrorRate
+        expr: |
+          (sum(rate(gateway_http_requests_total{job="thunderbolt",status=~"5.."}[5m])) /
+          clamp_min(sum(rate(gateway_http_requests_total{job="thunderbolt"}[5m])), 0.001)) > 0.05
+          and sum(increase(gateway_http_requests_total{job="thunderbolt"}[5m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Thunderbolt HTTP 5xx ratio exceeds 5 percent
+          description: Inspect request IDs in metadata logs, provider availability and policy database health.
+      - alert: ThunderboltControlPlaneLatency
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(gateway_http_request_duration_seconds_bucket{job="thunderbolt",route=~"/admin/api/.*|/auth/.*"}[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Thunderbolt control-plane p95 latency exceeds two seconds
+          description: Check database lock contention and identity provider response time.

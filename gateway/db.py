@@ -30,6 +30,7 @@ class PolicyLock(Base):
 
 class Team(Base):
     __tablename__ = "teams"
+    scim_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     name: Mapped[str] = mapped_column(String(120), unique=True)
     budget_micros: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -38,6 +39,7 @@ class Team(Base):
 
 class User(Base):
     __tablename__ = "users"
+    scim_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     email: Mapped[str] = mapped_column(String(320), unique=True)
     team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
@@ -151,15 +153,21 @@ def init_engine(url=None):
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"timeout": 30}
     else:
-        kwargs.update(pool_size=10, max_overflow=20)
+        kwargs.update(pool_size=10, max_overflow=20, isolation_level="READ COMMITTED")
     engine = create_async_engine(url, **kwargs)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return engine
 
 
 @asynccontextmanager
-async def transaction():
-    """Serialize policy decisions across replicas using one DB row; SQLite is dev-only."""
+async def transaction(*, inference=False):
+    """Policy writer gate; inference shares the gate and then locks its subjects.
+
+    Always acquire this gate before any subject row lock. Existing control-plane
+    callers retain the exclusive gate, so revocations and budget/identity edits
+    cannot interleave with admission/accounting decisions. Never upgrade a shared
+    gate to exclusive inside a transaction. SQLite remains serialized/dev-only.
+    """
     if session_factory is None:
         init_engine()
     async with session_factory() as session:
@@ -167,7 +175,7 @@ async def transaction():
             if engine.url.drivername.startswith("sqlite"):
                 await session.execute(text("BEGIN IMMEDIATE"))
             else:
-                locked = await session.scalar(select(PolicyLock.id).where(PolicyLock.id == 1).with_for_update())
+                locked = await session.scalar(select(PolicyLock.id).where(PolicyLock.id == 1).with_for_update(read=inference))
                 if locked != 1:
                     raise SQLAlchemyError("Policy lock missing; run schema migration")
             yield session
@@ -175,3 +183,20 @@ async def transaction():
 
 async def audit(session, actor, action, target=None, **details):
     session.add(Audit(actor_id=actor, action=action, target_id=target, details=details))
+
+
+async def lock_policy_subjects(session, team_id, user_id, key_id):
+    """Lock in universal Team -> User -> APIKey order, under the shared gate.
+
+    Subject identifiers must be read *after* taking the gate. The exclusive gate
+    used by all control-plane writes keeps ownership stable during these locks.
+    At READ COMMITTED, later budget reads see commits from previous row holders.
+    """
+    rows = []
+    for model, identifier in ((Team, team_id), (User, user_id), (APIKey, key_id)):
+        row = None
+        if identifier is not None:
+            row = await session.scalar(select(model).where(model.id == identifier)
+                                       .with_for_update().execution_options(populate_existing=True))
+        rows.append(row)
+    return tuple(rows)

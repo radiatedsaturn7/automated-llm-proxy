@@ -21,16 +21,17 @@ def token_bound(payload):
 
 
 async def reserve(identity, amount, tokens, model):
-    async with db.transaction() as s:
+    async with db.transaction(inference=True) as s:
         key = await s.get(db.APIKey, identity.key.id)
-        user = await s.get(db.User, identity.user.id)
+        if key is None:
+            raise HTTPException(401, "Credential changed")
+        team, user, key = await db.lock_policy_subjects(s, key.team_id, key.user_id, key.id)
         if not key or key.revoked or aware(key.expires_at) <= db.now() or not user or not user.enabled:
             raise HTTPException(401, "Credential changed")
-        if key.team_id != user.team_id:
+        if key.user_id != identity.user.id or key.team_id != user.team_id:
             raise HTTPException(403, "Credential team changed")
         if key.allowed_models and model not in key.allowed_models:
             raise HTTPException(403, "Model not allowed by key")
-        team = await s.get(db.Team, key.team_id) if key.team_id else None
         if key.team_id and (not team or not team.enabled):
             raise HTTPException(403, "Team disabled")
         period = db.now().strftime("%Y-%m")
@@ -62,9 +63,14 @@ async def reserve(identity, amount, tokens, model):
 
 
 async def finalize(reservation_id, model, provider_id, route, usage=None, release=False):
-    async with db.transaction() as s:
+    async with db.transaction(inference=True) as s:
         reservation = await s.get(db.Reservation, reservation_id)
-        if not reservation or reservation.status != "pending":
+        if not reservation:
+            return
+        await db.lock_policy_subjects(s, reservation.team_id, reservation.user_id, reservation.key_id)
+        reservation = await s.scalar(select(db.Reservation).where(db.Reservation.id == reservation_id)
+                                     .with_for_update().execution_options(populate_existing=True))
+        if reservation.status != "pending":
             return
         if release:
             reservation.status = "released"

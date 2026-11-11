@@ -14,4 +14,4 @@ COPY --from=builder /install /usr/local
 WORKDIR /app
 USER 10001:10001
 EXPOSE 8080
-CMD ["python", "-m", "uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-proxy-headers"]
+CMD ["python", "-m", "gateway.cli", "--host", "0.0.0.0", "--port", "8080"]

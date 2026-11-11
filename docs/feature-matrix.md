@@ -7,15 +7,15 @@ This is a working foundation under active development, **not** a fully enterpris
 | Stateless replicas | External PostgreSQL-backed identity, policy, sessions and accounting | Local SQLite is development-only; external state is essential |
 | Users and teams | Administrator/member roles; user and team budgets | One team per user; no delegated team-admin or arbitrary RBAC |
 | Virtual credentials | Expiry, revocation, rotation, model scopes, request/token allowances | Rotation immediately revokes old key; no grace window |
-| Provider abstraction | OpenAI-compatible and Anthropic adapters | Not full vendor API parity; validate supported request types |
+| Provider abstraction | OpenAI-compatible, Azure OpenAI v1 and Anthropic text adapters | Not full vendor API parity; validate supported request types |
 | Spending control | Shared reservations and UTC monthly accounting | Prices operator-maintained; crash reconciliation required; not invoice reconciliation |
-| SSO | OIDC with explicit group mapping and browser sessions | No SAML, SCIM, local passwords or full enterprise provisioning lifecycle |
+| SSO | OIDC with explicit group mapping and browser sessions | SCIM Users/Groups provisioning subset and explicit offboarding; no SAML, local passwords or IdP certification |
 | Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Advanced edits through API; no delegated end-user portal |
 | Local relay | Authenticated loopback forwarding and short-lived access-token renewal | Does not rotate provider keys or its long-lived agent credential automatically |
 | Evaluation | Bounded deterministic checks of supplied outputs | No automatic model calls, LLM judges, prompt registry or experiment dashboard |
 | Deployment | Container and deployment examples for simple and replicated setups | Infrastructure must be supplied/validated; examples are not certification |
 | Audit | Administrative and usage metadata in database | No immutable audit storage, retention scheduler or SIEM delivery guarantee |
-| Monitoring | Health/readiness and metrics integration in application/deployment | Production dashboards, alerts and SLOs remain operator work |
+| Monitoring | Health/readiness and metrics integration in application/deployment | Correlation IDs, bounded route metrics, structured metadata logs, example dashboards/alerts; SLO ownership remains operator work |
 | Advanced reliability | Bounded requests and explicit failure handling | No claim of automatic cross-provider semantic equivalence or exactly-once inference |
 | Extensibility | Explicit source-level provider adapters | No untrusted plugin loader or isolation sandbox |
 | Governance | Model scopes and privileged provider configuration | No DLP, moderation suite, compliance attestation or data residency enforcement |

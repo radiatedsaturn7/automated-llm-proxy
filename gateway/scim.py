@@ -110,8 +110,83 @@ async def service_config():
     }
 
 
+def discovery_resources(kind):
+    if kind == "ResourceTypes":
+        return [
+            {
+                "schemas": [PREFIX + "core:2.0:ResourceType"],
+                "id": name,
+                "name": name,
+                "endpoint": "/" + name + "s",
+                "schema": schema,
+                "schemaExtensions": [],
+            }
+            for name, schema in [("User", USER), ("Group", GROUP)]
+        ]
+    if kind == "Schemas":
+
+        def attribute(name, data_type="string", required=False, multi=False, sub=None):
+            result = {
+                "name": name,
+                "type": data_type,
+                "multiValued": multi,
+                "required": required,
+                "mutability": "readWrite",
+                "returned": "default",
+                "uniqueness": "none",
+            }
+            if data_type == "string":
+                result["caseExact"] = name != "userName"
+            if sub:
+                result["subAttributes"] = sub
+            return result
+
+        username = attribute("userName", required=True)
+        username["uniqueness"] = "server"
+        return [
+            {
+                "schemas": [PREFIX + "core:2.0:Schema"],
+                "id": USER,
+                "name": "User",
+                "description": "Thunderbolt supported User attribute subset; userName must be email",
+                "attributes": [username, attribute("active", "boolean")],
+            },
+            {
+                "schemas": [PREFIX + "core:2.0:Schema"],
+                "id": GROUP,
+                "name": "Group",
+                "description": "Thunderbolt single-team Group subset; at most 1000 members",
+                "attributes": [
+                    attribute("displayName", required=True),
+                    attribute(
+                        "members",
+                        "complex",
+                        multi=True,
+                        sub=[
+                            attribute("value", required=True),
+                            attribute("display"),
+                            attribute("$ref", "reference"),
+                        ],
+                    ),
+                ],
+            },
+        ]
+    return None
+
+
 @router.get("/{kind}")
 async def list_resources(kind: str, request: Request):
+    definitions = discovery_resources(kind)
+    if definitions is not None:
+        if request.query_params:
+            fail("Discovery collections do not support query parameters")
+        return {
+            "schemas": [LIST],
+            "totalResults": len(definitions),
+            "startIndex": 1,
+            "itemsPerPage": len(definitions),
+            "Resources": definitions,
+        }
     if kind not in {"Users", "Groups"}:
         fail("Unknown resource type", 404)
     model = db.User if kind == "Users" else db.Team
@@ -156,6 +231,12 @@ async def list_resources(kind: str, request: Request):
 
 @router.get("/{kind}/{resource_id}")
 async def get_resource(kind: str, resource_id: str):
+    definitions = discovery_resources(kind)
+    if definitions is not None:
+        match = next((item for item in definitions if item["id"] == resource_id), None)
+        if match is None:
+            fail("Resource not found", 404)
+        return match
     if kind not in {"Users", "Groups"}:
         fail("Unknown resource type", 404)
     async with db.session_factory() as session:
@@ -211,6 +292,7 @@ async def patch_user(resource_id: str, request: Request, identity: Identity = De
             not isinstance(op, dict)
             or set(op) - {"op", "path", "value"}
             or str(op.get("op")).lower() != "replace"
+            or (op.get("path") is not None and not isinstance(op["path"], str))
         ):
             fail("Only replace operations supported")
         values = {op["path"]: op.get("value")} if op.get("path") else op.get("value")
@@ -279,12 +361,16 @@ async def set_members(session, group, members):
     current = (await session.scalars(select(db.User).where(db.User.team_id == group.id))).all()
     if any(u.role == "admin" for u in current):
         fail("Administrator teams must be managed through administration", 403)
+    changed = {u.id for u in current if u.id not in ids} | {u.id for u in users if u.team_id != group.id}
     for user in current:
         if user.id not in ids:
             user.team_id = None
     for user in users:
         user.team_id = group.id
-    # Existing scoped keys fail closed after team changes. Issue new keys explicitly.
+    if changed:
+        # Revoke, rather than relying only on team binding: remove/re-add must not revive keys.
+        await session.execute(update(db.APIKey).where(db.APIKey.user_id.in_(changed)).values(revoked=True))
+        await session.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id.in_(changed)))
     await session.flush()
 
 
@@ -303,28 +389,116 @@ async def create_group(request: Request, identity: Identity = Depends(admin)):
         return await group_resource(session, group)
 
 
-@router.patch("/Groups/{resource_id}")
-async def patch_group(resource_id: str, request: Request, identity: Identity = Depends(admin)):
-    body = await payload(request, {"schemas", "Operations"})
+def patch_operations(body):
     ops = body.get("Operations")
     if (
         body.get("schemas") != [PREFIX + "api:messages:2.0:PatchOp"]
         or not isinstance(ops, list)
-        or len(ops) != 1
+        or not 1 <= len(ops) <= 20
     ):
-        fail("One replace members operation required")
-    op = ops[0]
+        fail("Between 1 and 20 patch operations required")
+    for op in ops:
+        if (
+            not isinstance(op, dict)
+            or set(op) - {"op", "path", "value"}
+            or str(op.get("op")).lower() not in {"add", "replace", "remove"}
+        ):
+            fail("Invalid patch operation")
+    return ops
+
+
+def group_name(value):
+    if not isinstance(value, str) or not 1 <= len(value) <= 120 or not value.strip():
+        fail("displayName must contain 1 to 120 characters")
+    return value
+
+
+@router.put("/Users/{resource_id}")
+async def replace_user(resource_id: str, request: Request, identity: Identity = Depends(admin)):
+    body = await payload(request, {"schemas", "id", "meta", "userName", "active", "externalId"})
     if (
-        not isinstance(op, dict)
-        or set(op) - {"op", "path", "value"}
-        or str(op.get("op")).lower() != "replace"
-        or op.get("path") != "members"
+        body.get("schemas") != [USER]
+        or body.get("id", resource_id) != resource_id
+        or not isinstance(body.get("active", True), bool)
     ):
-        fail("Only replace members supported")
+        fail("Invalid replacement user schema, id or active attribute")
+    name, external_id = email(body.get("userName")), external(body.get("externalId"))
+    async with db.transaction() as session:
+        user = await session.get(db.User, resource_id)
+        if not user:
+            fail("Resource not found", 404)
+        if user.role == "admin":
+            fail("Administrator identities must be managed through administration", 403)
+        user.email, user.enabled, user.scim_external_id = name, body.get("active", True), external_id
+        if not user.enabled:
+            await session.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user.id))
+            await session.execute(update(db.APIKey).where(db.APIKey.user_id == user.id).values(revoked=True))
+        await db.audit(session, identity.user.id, "scim.user.replace", user.id)
+        return user_resource(user)
+
+
+@router.patch("/Groups/{resource_id}")
+async def patch_group(resource_id: str, request: Request, identity: Identity = Depends(admin)):
+    body = await payload(request, {"schemas", "Operations"})
+    ops = patch_operations(body)
     async with db.transaction() as session:
         group = await session.get(db.Team, resource_id)
         if not group:
             fail("Resource not found", 404)
-        await set_members(session, group, op.get("value"))
-        await db.audit(session, identity.user.id, "scim.group.members.replace", group.id)
+        if await session.scalar(
+            select(db.User.id).where(db.User.team_id == group.id, db.User.role == "admin").limit(1)
+        ):
+            fail("Administrator teams must be managed through administration", 403)
+        for op in ops:
+            if op.get("path") is not None and not isinstance(op["path"], str):
+                fail("Patch path must be a string")
+            action, path, value = op["op"].lower(), op.get("path"), op.get("value")
+            if path is None and action in {"add", "replace"}:
+                if (
+                    not isinstance(value, dict)
+                    or not value
+                    or set(value) - {"displayName", "externalId", "members"}
+                ):
+                    fail("Unsupported group attributes")
+                changes = value
+            else:
+                changes = {path: value}
+            for attribute, new_value in changes.items():
+                if attribute == "displayName" and action in {"add", "replace"}:
+                    group.name = group_name(new_value)
+                elif attribute == "externalId":
+                    group.scim_external_id = None if action == "remove" else external(new_value)
+                elif attribute == "members":
+                    current = (
+                        await session.scalars(select(db.User.id).where(db.User.team_id == group.id))
+                    ).all()
+                    if action == "replace":
+                        await set_members(session, group, new_value)
+                    elif action == "add":
+                        if not isinstance(new_value, list) or len(new_value) > 1000:
+                            fail("members add requires a list of up to 1000 users")
+                        new_ids = {
+                            item.get("value")
+                            for item in new_value
+                            if isinstance(item, dict) and isinstance(item.get("value"), str)
+                        }
+                        await set_members(
+                            session, group, [{"value": u} for u in current if u not in new_ids] + new_value
+                        )
+                    elif "value" in op:
+                        fail('Use members[value eq "id"] to remove a specific member')
+                    else:
+                        await set_members(session, group, [])
+                elif isinstance(attribute, str) and action == "remove":
+                    match = re.fullmatch(r'members\[value eq "([^"\\]{1,36})"\]', attribute)
+                    if not match or "value" in op:
+                        fail('Only exact members[value eq "id"] removal supported')
+                    current = (
+                        await session.scalars(select(db.User.id).where(db.User.team_id == group.id))
+                    ).all()
+                    await set_members(session, group, [{"value": u} for u in current if u != match[1]])
+                else:
+                    fail("Unsupported group patch operation")
+        await session.flush()
+        await db.audit(session, identity.user.id, "scim.group.update", group.id, operations=len(ops))
         return await group_resource(session, group)

@@ -9,6 +9,7 @@
     providers: "Register trusted provider endpoints. Provider credentials are write-only and are never displayed by this interface.",
     keys: "Issue scoped, expiring credentials. Raw keys appear once at creation or rotation.",
     audit: "Administrative and request metadata. Prompts and model responses should not be included in these records.",
+    prompts: "Version prompts explicitly, preview literal variables and save deterministic evaluation reports.",
     evaluation: "Run bounded, deterministic checks on supplied outputs. No provider requests are made."
   };
   const fields = {
@@ -243,11 +244,13 @@
     $("view-title").textContent = state.view[0].toUpperCase() + state.view.slice(1);
     $("view-description").textContent = descriptions[state.view];
     $("evaluation").hidden = state.view !== "evaluation";
-    $("table-wrap").hidden = state.view === "evaluation";
+    $("table-wrap").hidden = ["evaluation", "prompts"].includes(state.view);
+    $("prompts").hidden = state.view !== "prompts";
     $("summary").hidden = state.view !== "overview";
     if (rebuild) renderEditor();
     try {
       if (state.view === "evaluation") return;
+      if (state.view === "prompts") { await loadPrompts(); return; }
       const data = await api(`/admin/api/${state.view === "overview" ? "usage" : state.view}`);
       if (generation !== state.generation || !state.authenticated) return;
       renderTable(data);
@@ -258,6 +261,98 @@
       }
     } catch (error) { if (generation === state.generation) showError(error); }
     finally { if (generation === state.generation) $("refresh").disabled = false; }
+  }
+  const promptState = { templates: [], versions: [], generation: 0 };
+  const promptBase = "/admin/api/prompt-registry";
+  function promptPath() {
+    if (!$("prompt-template").value || !$("prompt-version").value) throw new Error("Select a stored template and version first.");
+    return `${promptBase}/templates/${encodeURIComponent($("prompt-template").value)}/versions/${encodeURIComponent($("prompt-version").value)}`;
+  }
+  function promptActive(generation) { return state.authenticated && state.view === "prompts" && generation === promptState.generation; }
+  async function loadPrompts(selected) {
+    const generation = ++promptState.generation;
+    const previous = selected || $("prompt-template").value;
+    const templates = await api(`${promptBase}/templates`);
+    if (!promptActive(generation)) return;
+    promptState.templates = templates;
+    $("prompt-template").replaceChildren();
+    templates.forEach((row) => { const option = node("option", `${row.name}${row.archived ? " (archived)" : ""}`); option.value = row.id; $("prompt-template").append(option); });
+    if (templates.some((row) => row.id === previous)) $("prompt-template").value = previous;
+    await loadPromptVersions();
+  }
+  async function loadPromptVersions(selectLatest = false) {
+    const generation = ++promptState.generation;
+    const templateId = $("prompt-template").value;
+    const previous = $("prompt-version").value;
+    const template = promptState.templates.find((row) => row.id === templateId);
+    $("prompt-archive").disabled = !template;
+    $("prompt-archive").textContent = template?.archived ? "Restore template" : "Archive template";
+    $("prompt-version-form").querySelector("button").disabled = !template || template.archived;
+    $("prompt-version").replaceChildren();
+    $("prompt-version-content").textContent = ""; $("prompt-preview").textContent = ""; $("prompt-reports").textContent = "";
+    promptState.versions = [];
+    if (!templateId) return;
+    const versions = await api(`${promptBase}/templates/${encodeURIComponent(templateId)}/versions`);
+    if (!promptActive(generation)) return;
+    promptState.versions = versions;
+    versions.forEach((row) => { const option = node("option", `Version ${row.version}`); option.value = row.version; $("prompt-version").append(option); });
+    if (selectLatest && versions.length) $("prompt-version").value = versions[versions.length - 1].version;
+    else if (versions.some((row) => String(row.version) === previous)) $("prompt-version").value = previous;
+    await showPromptVersion();
+  }
+  async function showPromptVersion() {
+    const generation = ++promptState.generation;
+    const version = promptState.versions.find((row) => String(row.version) === $("prompt-version").value);
+    $("prompt-version-content").textContent = version?.content || "";
+    $("prompt-preview").textContent = ""; $("prompt-reports").textContent = "";
+    $("prompt-variables").value = JSON.stringify(Object.fromEntries((version?.variables || []).map((name) => [name, ""])), null, 2);
+    if (!version) return;
+    const reports = await api(`${promptBase}/evaluations?prompt_version_id=${encodeURIComponent(version.id)}`);
+    if (promptActive(generation)) $("prompt-reports").textContent = reports.length ? JSON.stringify(reports, null, 2) : "No saved reports for this version.";
+  }
+  function promptForm(id, action) {
+    $(id).addEventListener("submit", async (event) => {
+      event.preventDefault(); clearError(); const button = event.submitter; button.disabled = true;
+      try { await action(); } catch (error) { if (state.authenticated) showError(error); }
+      finally { button.disabled = false; }
+    });
+  }
+  promptForm("prompt-create-form", async () => {
+    const result = await api(`${promptBase}/templates`, { method: "POST", body: { name: $("prompt-name").value, content: $("prompt-content").value } });
+    if (!state.authenticated || state.view !== "prompts") return;
+    $("prompt-create-form").reset(); message("Template and immutable version 1 stored."); await loadPrompts(result.template.id);
+  });
+  promptForm("prompt-version-form", async () => {
+    if (!$("prompt-template").value) throw new Error("Select a template first.");
+    const path = `${promptBase}/templates/${encodeURIComponent($("prompt-template").value)}/versions`;
+    await api(path, { method: "POST", body: { content: $("prompt-next-content").value } });
+    if (!state.authenticated || state.view !== "prompts") return;
+    $("prompt-next-content").value = ""; message("Immutable version appended."); await loadPromptVersions(true);
+  });
+  promptForm("prompt-render-form", async () => {
+    const generation = promptState.generation;
+    const result = await api(`${promptPath()}/render`, { method: "POST", body: { variables: JSON.parse($("prompt-variables").value) } });
+    if (promptActive(generation)) $("prompt-preview").textContent = result.content;
+  });
+  promptForm("prompt-evaluate-form", async () => {
+    const generation = promptState.generation;
+    await api(`${promptPath()}/evaluations`, { method: "POST", body: { cases: JSON.parse($("prompt-cases").value), rules: JSON.parse($("prompt-rules").value) } });
+    if (promptActive(generation)) { message("Deterministic evaluation report saved."); await showPromptVersion(); }
+  });
+  $("prompt-template").addEventListener("change", () => loadPromptVersions().catch(showError));
+  $("prompt-version").addEventListener("change", () => showPromptVersion().catch(showError));
+  $("prompt-archive").addEventListener("click", async (event) => {
+    const template = promptState.templates.find((row) => row.id === $("prompt-template").value);
+    if (!template || !window.confirm(`${template.archived ? "Restore" : "Archive"} template ${template.name}? Existing versions and reports are retained.`)) return;
+    const button = event.currentTarget; button.disabled = true;
+    try { await api(`${promptBase}/templates/${encodeURIComponent(template.id)}`, { method: "PATCH", body: { archived: !template.archived } }); if (state.authenticated && state.view === "prompts") await loadPrompts(template.id); }
+    catch (error) { if (state.authenticated) showError(error); }
+    finally { button.disabled = false; }
+  });
+  function clearPrompts() {
+    ++promptState.generation; promptState.templates = []; promptState.versions = [];
+    ["prompt-name", "prompt-content", "prompt-next-content", "prompt-variables", "prompt-cases", "prompt-rules"].forEach((id) => { $(id).value = ""; });
+    ["prompt-template", "prompt-version", "prompt-version-content", "prompt-preview", "prompt-reports"].forEach((id) => $(id).replaceChildren());
   }
   async function connect() {
     const session = await api("/auth/session");
@@ -325,7 +420,7 @@
     try { await api("/auth/logout", { method: "POST" }); }
     catch (error) { showError(new Error(`Server sign-out could not be confirmed: ${error.message}. Close this tab and end the session at your identity provider if necessary.`)); }
     finally {
-      state.bearer = ""; state.csrf = ""; state.authenticated = false; ++state.generation;
+      state.bearer = ""; state.csrf = ""; state.authenticated = false; ++state.generation; clearPrompts();
       $("secret-dialog").close(); clearSecret(); $("resource-form").replaceChildren(); $("table-wrap").replaceChildren(); $("summary").replaceChildren(); $("eval-result").textContent = "";
       $("workspace").hidden = true; $("login").hidden = false; $("identity").textContent = "Not signed in"; message("Local credentials cleared.");
     }
@@ -337,6 +432,6 @@
     try { await navigator.clipboard.writeText($("new-secret").value); $("copy-status").textContent = "Copied. Clear your clipboard after storing the credential."; }
     catch (_) { $("copy-status").textContent = "Clipboard unavailable. Select the credential and copy it manually."; }
   });
-  window.addEventListener("pagehide", () => { state.bearer = ""; state.csrf = ""; clearSecret(); });
+  window.addEventListener("pagehide", () => { state.bearer = ""; state.csrf = ""; clearSecret(); clearPrompts(); });
   connect().catch(() => { /* A signed-out page is the expected initial state. */ });
 })();

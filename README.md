@@ -47,6 +47,9 @@ uv run ruff check .
 
 - [Deployment, Compose, Helm, Terraform](deploy/README.md)
 - [Versioned migrations and legacy adoption](docs/migrations.md)
+- [Prompt registry and evaluation reports](docs/prompts.md)
+- [Member self-service](docs/self-service.md)
+- [Observability and monitoring](docs/observability.md)
 - [Provider compatibility](docs/providers.md)
 - [SCIM provisioning subset](docs/provisioning.md)
 - [Operational cleanup and recovery](docs/operations.md)

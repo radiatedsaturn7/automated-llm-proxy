@@ -64,3 +64,11 @@ implicitly adopted. Index creation is transactional but not concurrent: schedule
 an appropriate maintenance window on populated installations. The test suite
 checks v1 data preservation, null handling, uniqueness and drift refusal before
 any v2 alteration.
+
+## Revision 3: explicit prompt registry
+
+Revision 3 creates prompt-template, immutable prompt-version and offline evaluation
+report tables. It leaves v1/v2 policy, accounting and SCIM data untouched. Only
+administrators explicitly submitting templates store prompt content; inference
+traffic is not retained. See [prompts.md](prompts.md) for plaintext-storage and
+retention limitations. Existing versioned v2 schemas are validated before upgrade.

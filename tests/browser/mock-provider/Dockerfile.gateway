@@ -1,0 +1,6 @@
+# Test-only image; production Dockerfile and trust roots remain unchanged.
+FROM automated-llm-proxy:local
+USER root
+COPY tests/browser/mock-provider/tls/server.crt /tmp/mock-ca.crt
+RUN cat /tmp/mock-ca.crt >> "$(python -c 'import certifi; print(certifi.where())')" && rm /tmp/mock-ca.crt
+USER 10001:10001

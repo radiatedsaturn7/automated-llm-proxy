@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from gateway import db
 from gateway.migrate import MigrationError, downgrade, migrate, versions, version_metadata
-from gateway.migrations import v0001
+from gateway.migrations import HEAD, v0001
 
 
 @pytest.fixture
@@ -17,7 +17,7 @@ async def migration_engine(tmp_path, monkeypatch):
     engine = create_async_engine(url, **kwargs)
     if os.environ.get("TEST_DATABASE_URL"):
         async with engine.begin() as conn:
-            await conn.run_sync(v0001.Base.metadata.drop_all)
+            await conn.run_sync(db.Base.metadata.drop_all)
             await conn.run_sync(version_metadata.drop_all)
     monkeypatch.setattr(db, "engine", engine)
     yield engine
@@ -35,17 +35,17 @@ async def legacy(engine):
 
 
 async def test_fresh_upgrade_idempotent_preserves_data(migration_engine):
-    assert await migrate() == 2
+    assert await migrate() == HEAD
     async with migration_engine.begin() as conn:
         await conn.execute(v0001.Team.__table__.insert().values(id="test", name="preserved", enabled=True))
-    assert await migrate() == 2
+    assert await migrate() == HEAD
     async with migration_engine.connect() as conn:
-        assert (await conn.execute(select(versions.c.version))).scalars().all() == [1, 2]
+        assert (await conn.execute(select(versions.c.version))).scalars().all() == list(range(1, HEAD + 1))
         assert (await conn.execute(text("SELECT name FROM teams"))).scalar() == "preserved"
 
 
 async def test_concurrent_upgrades_serialized(migration_engine):
-    assert await asyncio.gather(migrate(), migrate()) == [2, 2]
+    assert await asyncio.gather(migrate(), migrate()) == [HEAD, HEAD]
 
 
 async def test_legacy_requires_explicit_adoption(migration_engine):
@@ -53,8 +53,8 @@ async def test_legacy_requires_explicit_adoption(migration_engine):
     with pytest.raises(MigrationError, match="--adopt-v1"):
         await migrate()
     assert "gateway_schema_versions" not in await table_names(migration_engine)
-    assert await migrate(adopt_v1=True) == 2
-    assert await migrate() == 2
+    assert await migrate(adopt_v1=True) == HEAD
+    assert await migrate() == HEAD
 
 
 @pytest.mark.parametrize("mutation", ["ALTER TABLE teams ADD COLUMN unexpected TEXT", "DROP INDEX ix_audit_created_at",
@@ -97,7 +97,7 @@ async def test_postgres_serial_defaults_validate_and_tampering_rejected(migratio
     if migration_engine.dialect.name != "postgresql":
         pytest.skip("Set TEST_DATABASE_URL for PostgreSQL SERIAL regression")
     await legacy(migration_engine)
-    assert await migrate(adopt_v1=True) == 2
+    assert await migrate(adopt_v1=True) == HEAD
     async with migration_engine.begin() as conn:
         await conn.execute(text("ALTER TABLE policy_lock ALTER COLUMN id SET DEFAULT 42"))
     with pytest.raises(MigrationError, match="Schema column differs"):
@@ -114,7 +114,7 @@ async def test_versioned_v1_upgrade_preserves_rows_and_external_id_uniqueness(mi
         await conn.execute(v0001.Team.__table__.insert().values(id="legacy", name="old", enabled=True))
         await conn.execute(v0001.User.__table__.insert().values(id="legacy-user", email="old@example.com",
                                                                team_id="legacy", role="member", enabled=True))
-    assert await migrate() == 2
+    assert await migrate() == HEAD
     async with migration_engine.begin() as conn:
         assert (await conn.execute(select(db.User.scim_external_id).where(db.User.id == "legacy-user"))).scalar() is None
         await conn.execute(db.User.__table__.update().where(db.User.id == "legacy-user").values(scim_external_id="idp-user"))
@@ -130,7 +130,7 @@ async def test_versioned_v1_upgrade_preserves_rows_and_external_id_uniqueness(mi
         async with migration_engine.begin() as conn:
             await conn.execute(db.Team.__table__.insert().values(id="duplicate", name="duplicate", enabled=True,
                                                                 scim_external_id="idp-user"))
-    assert await migrate() == 2
+    assert await migrate() == HEAD
 
 
 async def test_versioned_v1_drift_refuses_upgrade_before_altering(migration_engine):
@@ -146,3 +146,20 @@ async def test_versioned_v1_drift_refuses_upgrade_before_altering(migration_engi
         columns = await conn.run_sync(lambda c: [col["name"] for col in inspect(c).get_columns("teams")])
         assert "scim_external_id" not in columns
         assert (await conn.execute(select(versions.c.version))).scalars().all() == [1]
+
+
+async def test_versioned_v2_upgrade_preserves_scim_identifiers(migration_engine):
+    from datetime import datetime, timezone
+    from gateway.migrations import v0002
+    async with migration_engine.begin() as conn:
+        await conn.run_sync(v0001.upgrade)
+        await conn.run_sync(v0002.upgrade)
+        await conn.run_sync(version_metadata.create_all)
+        for number in (1, 2):
+            await conn.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
+        await conn.execute(v0002.metadata.tables["teams"].insert().values(
+            id="preserved-scim", name="preserved", enabled=True, scim_external_id="idp-group"))
+    assert await migrate() == HEAD
+    async with migration_engine.connect() as conn:
+        assert (await conn.execute(select(db.Team.scim_external_id))).scalar() == "idp-group"
+        assert (await conn.execute(select(db.PromptTemplate.id))).scalars().all() == []

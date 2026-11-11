@@ -2,16 +2,23 @@ import asyncio
 import os
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from gateway import db
+from gateway.config import get_settings
 from gateway.migrate import MigrationError, downgrade, migrate, versions, version_metadata
 from gateway.migrations import HEAD, v0001
 
 
 @pytest.fixture
 async def migration_engine(tmp_path, monkeypatch):
+    monkeypatch.setenv("GATEWAY_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("GATEWAY_SIGNING_KEY", "migration-test-" + "x" * 40)
+    monkeypatch.setenv("BOOTSTRAP_TOKEN", "migration-test-" + "x" * 40)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    get_settings.cache_clear()
     url = os.environ.get("TEST_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/migration.db")
     kwargs = {"connect_args": {"timeout": 30}} if url.startswith("sqlite") else {}
     engine = create_async_engine(url, **kwargs)
@@ -22,6 +29,7 @@ async def migration_engine(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "engine", engine)
     yield engine
     await engine.dispose()
+    get_settings.cache_clear()
 
 
 async def table_names(engine):

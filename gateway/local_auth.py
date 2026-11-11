@@ -87,6 +87,27 @@ async def throttle(email, ip):
         raise HTTPException(429, "Login temporarily unavailable", headers={"Retry-After": "900"})
 
 
+async def revalidate_admin(session, identity):
+    """Recheck the original credential under the writer gate, not a stale snapshot."""
+    user = await session.get(db.User, identity.user.id)
+    if not user or not user.enabled or user.role != "admin":
+        raise HTTPException(403, "Administrator authorization changed")
+    if identity.key:
+        key = await session.get(db.APIKey, identity.key.id)
+        if (not key or key.kind != "api" or key.user_id != user.id or key.revoked
+                or key.digest != identity.key.digest or aware(key.expires_at) <= db.now()
+                or not isinstance(key.permissions, list) or "admin" not in key.permissions
+                or not await db.active_membership(session, user, key.team_id)):
+            raise HTTPException(403, "Administrator authorization changed")
+    elif identity.session:
+        browser = await session.get(db.BrowserSession, identity.session.digest)
+        if (not browser or browser.user_id != user.id or aware(browser.expires_at) <= db.now()
+                or browser.csrf != identity.session.csrf):
+            raise HTTPException(403, "Administrator authorization changed")
+    else:
+        raise HTTPException(403, "Administrator authorization required")
+
+
 @router.get("/auth/local/options")
 async def options():
     return {"enabled": get_settings().local_password_enabled}
@@ -97,6 +118,7 @@ async def provision(user_id: str, body: PasswordBody, identity: Identity = Depen
     enabled()
     encoded = await derive(password_hash, body.password.get_secret_value())
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         user = await s.get(db.User, user_id)
         if not user:
             raise HTTPException(404, "User not found")
@@ -115,6 +137,7 @@ async def provision(user_id: str, body: PasswordBody, identity: Identity = Depen
 async def revoke(user_id: str, identity: Identity = Depends(admin)):
     # Revocation remains available even while login is disabled.
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         await s.execute(delete(db.LocalPassword).where(db.LocalPassword.user_id == user_id))
         await s.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user_id))
         await db.audit(s, identity.user.id, "local_password.revoke", user_id)

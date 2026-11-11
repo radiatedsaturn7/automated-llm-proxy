@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import select, func
 from gateway import db
 from gateway.config import get_settings
@@ -153,3 +154,63 @@ async def test_scim_takeover_erases_local_credential(client, admin_headers, monk
         assert await s.get(db.LocalPassword, uid) is None
         assert (await s.get(db.User, uid)).scim_managed
     assert not (await client.get('/auth/session')).json()['authenticated']
+
+
+
+@pytest.mark.parametrize('change', ['demote', 'disable', 'revoke', 'rotate', 'expire', 'permissions'])
+async def test_caller_authorization_rechecked_after_hash(client, admin_headers, monkeypatch, change):
+    from datetime import timedelta
+    from gateway import local_auth
+    await setup(client, admin_headers, monkeypatch)
+    target = (await client.post('/admin/api/users', headers=admin_headers,
+                               json={'email': 'target@example.com'})).json()['id']
+    original = local_auth.derive
+
+    async def revoke_during_hash(function, *args):
+        result = await original(function, *args)
+        async with db.transaction() as s:
+            user = await s.scalar(select(db.User).where(db.User.email == 'admin@example.com'))
+            key = await s.scalar(select(db.APIKey).where(db.APIKey.user_id == user.id))
+            if change == 'demote':
+                user.role = 'member'
+            elif change == 'disable':
+                user.enabled = False
+            elif change == 'revoke':
+                key.revoked = True
+            elif change == 'rotate':
+                key.digest = 'rotated'
+            elif change == 'expire':
+                key.expires_at = db.now() - timedelta(seconds=1)
+            else:
+                key.permissions = ['inference']
+        return result
+    monkeypatch.setattr(local_auth, 'derive', revoke_during_hash)
+    response = await client.put(f'/admin/api/users/{target}/password', headers=admin_headers,
+                                json={'password': PASSWORD})
+    assert response.status_code == 403, response.text
+    async with db.session_factory() as s:
+        assert await s.get(db.LocalPassword, target) is None
+
+
+async def test_caller_session_revoked_during_hash(client, admin_headers, monkeypatch):
+    from sqlalchemy import delete
+    from gateway import local_auth
+    await setup(client, admin_headers, monkeypatch)
+    target = (await client.post('/admin/api/users', headers=admin_headers,
+                               json={'email': 'target@example.com'})).json()['id']
+    assert (await client.post('/auth/local/login', headers=ORIGIN,
+                              json={'email': 'admin@example.com', 'password': PASSWORD})).status_code == 200
+    csrf = (await client.get('/auth/session')).json()['csrf_token']
+    original = local_auth.derive
+
+    async def revoke_during_hash(function, *args):
+        result = await original(function, *args)
+        async with db.transaction() as s:
+            await s.execute(delete(db.BrowserSession))
+        return result
+    monkeypatch.setattr(local_auth, 'derive', revoke_during_hash)
+    response = await client.put(f'/admin/api/users/{target}/password', headers={**ORIGIN, 'x-csrf-token': csrf},
+                                json={'password': PASSWORD})
+    assert response.status_code == 403, response.text
+    async with db.session_factory() as s:
+        assert await s.get(db.LocalPassword, target) is None

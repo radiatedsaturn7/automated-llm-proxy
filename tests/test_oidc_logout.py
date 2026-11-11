@@ -118,3 +118,21 @@ async def test_concurrent_deliveries_are_idempotent(client, logout):
     async with db.transaction() as s:
         assert await s.scalar(select(func.count()).select_from(db.OIDCLogoutReplay)) == 1
         assert await s.scalar(select(func.count()).select_from(db.Audit).where(db.Audit.action == 'oidc.backchannel_logout')) == 1
+
+
+async def test_logout_ages_out_while_waiting_for_writer_gate(client, logout, monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    original = db.transaction
+    clock = {'offset': 0}
+    monkeypatch.setattr(auth, 'time', SimpleNamespace(time=lambda: time.time()+clock['offset'], monotonic=time.monotonic))
+
+    @asynccontextmanager
+    async def delayed_gate(*args, **kwargs):
+        async with original(*args, **kwargs) as session:
+            clock['offset'] = 601
+            yield session
+    monkeypatch.setattr(db, 'transaction', delayed_gate)
+    response = await send(client, signed(logout))
+    assert response.status_code == 400, response.text
+    assert len(await sessions()) == 5

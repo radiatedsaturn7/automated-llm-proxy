@@ -255,6 +255,14 @@ async def oidc_callback(request: Request, state: str = "", code: str = ""):
     subject = cfg.oidc_issuer + "|" + claims["sub"]
     raw = secrets.token_urlsafe(32)
     async with db.transaction() as s:
+        # Gate waits must not extend JWT validity or outlive logout tombstones.
+        try:
+            jwt.decode(token, key, algorithms=[algorithm], audience=cfg.oidc_client_id,
+                       issuer=cfg.oidc_issuer, options={"require": ["exp", "iat", "sub", "nonce"]})
+            if not 0 <= time.time() - claims["iat"] <= 300:
+                raise ValueError("Stale identity token")
+        except (ValueError, jwt.PyJWTError) as exc:
+            raise HTTPException(401, "Invalid identity token") from exc
         # Both logout and callback hold the shared DB policy writer gate.
         # A logout delivered during the IdP exchange therefore prevents a stale
         # token from resurrecting a revoked session, regardless of replica.
@@ -329,6 +337,13 @@ async def oidc_backchannel_logout(request: Request):
     replay_id = digest(json.dumps([cfg.oidc_issuer, claims["jti"]]))
     try:
         async with db.transaction() as s:
+            try:
+                jwt.decode(token, key, algorithms=[algorithm], audience=cfg.oidc_client_id,
+                           issuer=cfg.oidc_issuer, options={"require": ["iss", "aud", "iat", "jti"]})
+                if not 0 <= time.time() - claims["iat"] <= 300:
+                    raise ValueError("Stale logout token")
+            except (ValueError, jwt.PyJWTError) as exc:
+                raise HTTPException(400, "Invalid logout token") from exc
             # Unique primary key arbitrates concurrent requests across replicas.
             # Expired records are safe to remove because token age is bounded.
             await s.execute(delete(db.OIDCLogoutReplay).where(db.OIDCLogoutReplay.expires_at < db.now()))

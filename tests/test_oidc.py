@@ -163,3 +163,27 @@ async def test_logout_during_callback_does_not_resurrect_session(client, oidc, m
     response = await client.get('/auth/oidc/callback', params={'state': state, 'code': 'code'})
     assert response.status_code == expected, response.text
     assert (await client.get('/auth/session')).json()['authenticated'] == (expected == 303)
+
+
+async def test_oidc_token_ages_out_while_waiting_for_writer_gate(client, oidc, monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from gateway import db
+    original = db.transaction
+    clock = {'offset': 0}
+    monkeypatch.setattr(auth, 'time', SimpleNamespace(time=lambda: time.time()+clock['offset'], monotonic=time.monotonic))
+    state = await start(client, oidc)
+    calls = 0
+
+    @asynccontextmanager
+    async def delayed_gate(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        async with original(*args, **kwargs) as session:
+            if calls == 2:  # First consumes state; second creates session.
+                clock['offset'] = 601
+            yield session
+    monkeypatch.setattr(db, 'transaction', delayed_gate)
+    response = await client.get('/auth/oidc/callback', params={'state': state, 'code': 'code'})
+    assert response.status_code == 401, response.text
+    assert not (await client.get('/auth/session')).json()['authenticated']

@@ -1,0 +1,18 @@
+# Example only: requires an external HA PostgreSQL service and at least two schedulable nodes.
+replicaCount: 3
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: llm-gateway
+          topologyKey: kubernetes.io/hostname

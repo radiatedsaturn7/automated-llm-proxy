@@ -1,0 +1,55 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m pip install -e '.[dev]' pip-audit
+      - run: python -m ruff check .
+      - run: python -m pytest -q
+      - run: python -m pip_audit
+  deployments:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4.3.0
+        with: {version: v3.17.3}
+      - run: helm lint deploy/helm/llm-gateway --set existingSecret=test-secret
+      - run: helm template test deploy/helm/llm-gateway --set existingSecret=test-secret > /tmp/rendered.yaml
+      - run: helm template test deploy/helm/llm-gateway -f deploy/helm/llm-gateway/values-ha.yaml --set existingSecret=test-secret --set networkPolicy.enabled=true > /tmp/rendered-ha.yaml
+      - uses: hashicorp/setup-terraform@v3
+        with: {terraform_version: '1.10.5'}
+      - run: terraform -chdir=deploy/terraform fmt -check
+      - run: terraform -chdir=deploy/terraform init -backend=false
+      - run: terraform -chdir=deploy/terraform validate
+      - run: docker build -t automated-llm-proxy:ci .
+
+  postgres-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gateway
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: gateway_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U gateway -d gateway_test'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://gateway:test-only-password@localhost:5432/gateway_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: pytest -q

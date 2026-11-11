@@ -1,0 +1,7 @@
+apiVersion: v2
+name: llm-gateway
+description: Stateless LLM gateway with externally managed PostgreSQL and secrets
+type: application
+version: 0.1.0
+appVersion: '0.1.0'
+kubeVersion: '>=1.26.0-0'

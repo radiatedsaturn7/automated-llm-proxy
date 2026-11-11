@@ -98,3 +98,158 @@ async def test_external_id_roundtrip_and_uniqueness(client, admin_headers):
         "/scim/v2/Users", headers=admin_headers, json={**body, "userName": "second@example.com"}
     )
     assert result.status_code == 409
+
+
+async def test_user_put_replacement_and_admin_guard(client, admin_headers):
+    user = await add_user(client, admin_headers)
+    path = "/scim/v2/Users/" + user["id"]
+    result = await client.put(
+        path,
+        headers=admin_headers,
+        json={
+            "schemas": [USER],
+            "id": user["id"],
+            "userName": "renamed@example.com",
+            "externalId": "replacement",
+            "active": False,
+        },
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["externalId"] == "replacement" and not result.json()["active"]
+    result = await client.put(
+        path, headers=admin_headers, json={"schemas": [USER], "userName": "renamed@example.com"}
+    )
+    assert result.json()["active"] and "externalId" not in result.json()
+    assert (
+        await client.put(
+            path, headers=admin_headers, json={"schemas": [USER], "userName": "x@y.com", "id": "wrong"}
+        )
+    ).status_code == 400
+    admins = (await client.get("/admin/api/users", headers=admin_headers)).json()
+    admin_id = next(u["id"] for u in admins if u["role"] == "admin")
+    assert (
+        await client.put(
+            "/scim/v2/Users/" + admin_id,
+            headers=admin_headers,
+            json={"schemas": [USER], "userName": "overwrite@example.com"},
+        )
+    ).status_code == 403
+
+
+async def test_group_add_remove_rename_and_permanent_credential_revocation(client, admin_headers):
+    from datetime import timedelta
+    from gateway import db
+    from gateway.security import digest
+
+    user = await add_user(client, admin_headers)
+    group = (
+        await client.post(
+            "/scim/v2/Groups", headers=admin_headers, json={"schemas": [GROUP], "displayName": "original"}
+        )
+    ).json()
+    path = "/scim/v2/Groups/" + group["id"]
+
+    async def patch(operations):
+        return await client.patch(
+            path, headers=admin_headers, json={"schemas": [PATCH], "Operations": operations}
+        )
+
+    result = await patch([{"op": "Add", "path": "members", "value": [{"value": user["id"]}]}])
+    assert result.status_code == 200, result.text
+    key = (
+        await client.post(
+            "/admin/api/keys", headers=admin_headers, json={"name": "client", "user_id": user["id"]}
+        )
+    ).json()["key"]
+    async with db.transaction() as session:
+        session.add(
+            db.BrowserSession(
+                digest=digest("session"),
+                user_id=user["id"],
+                csrf="csrf",
+                expires_at=db.now() + timedelta(hours=1),
+            )
+        )
+    result = await patch(
+        [
+            {"op": "replace", "path": "displayName", "value": "renamed"},
+            {"op": "remove", "path": f'members[value eq "{user["id"]}"]'},
+        ]
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["displayName"] == "renamed" and result.json()["members"] == []
+    assert (
+        await patch([{"op": "add", "path": "members", "value": [{"value": user["id"]}]}])
+    ).status_code == 200
+    assert (await client.get("/v1/models", headers={"Authorization": "Bearer " + key})).status_code == 401
+    async with db.session_factory() as session:
+        assert await session.get(db.BrowserSession, digest("session")) is None
+
+
+async def test_group_patch_atomic_rollback_and_invalid_paths(client, admin_headers):
+    group = (
+        await client.post(
+            "/scim/v2/Groups", headers=admin_headers, json={"schemas": [GROUP], "displayName": "original"}
+        )
+    ).json()
+    path = "/scim/v2/Groups/" + group["id"]
+    for bad in [
+        {"op": "remove", "path": 'members[value co "a"]'},
+        {"op": "replace", "path": [], "value": []},
+        {"op": "replace", "path": "displayName", "value": ""},
+    ]:
+        response = await client.patch(
+            path,
+            headers=admin_headers,
+            json={
+                "schemas": [PATCH],
+                "Operations": [{"op": "replace", "path": "displayName", "value": "must-rollback"}, bad],
+            },
+        )
+        assert response.status_code == 400, response.text
+        assert (await client.get(path, headers=admin_headers)).json()["displayName"] == "original"
+
+
+async def test_bounded_discovery(client, admin_headers):
+    for kind in ["ResourceTypes", "Schemas"]:
+        response = await client.get("/scim/v2/" + kind, headers=admin_headers)
+        assert response.status_code == 200
+        assert response.json()["totalResults"] == 2
+        for item in response.json()["Resources"]:
+            detail = await client.get("/scim/v2/" + kind + "/" + item["id"], headers=admin_headers)
+            assert detail.status_code == 200 and detail.json() == item
+        assert (
+            await client.get("/scim/v2/" + kind, headers=admin_headers, params={"count": "999999"})
+        ).status_code == 400
+    assert (await client.get("/scim/v2/ResourceTypes")).status_code == 401
+
+
+async def test_group_rename_cannot_modify_admin_team(client, admin_headers):
+    from gateway import db
+
+    users = (await client.get("/admin/api/users", headers=admin_headers)).json()
+    admin_id = next(u["id"] for u in users if u["role"] == "admin")
+    group = (
+        await client.post(
+            "/scim/v2/Groups", headers=admin_headers, json={"schemas": [GROUP], "displayName": "protected"}
+        )
+    ).json()
+    async with db.transaction() as session:
+        account = await session.get(db.User, admin_id)
+        account.team_id = group["id"]
+    # The old bootstrap key is invalid after a direct team change, so create a valid scoped admin key.
+    from gateway.security import new_key
+
+    async with db.transaction() as session:
+        raw, key = new_key(admin_id, group["id"], "protected-admin")
+        session.add(key)
+    headers = {"Authorization": "Bearer " + raw}
+    response = await client.patch(
+        "/scim/v2/Groups/" + group["id"],
+        headers=headers,
+        json={
+            "schemas": [PATCH],
+            "Operations": [{"op": "replace", "path": "displayName", "value": "hijack"}],
+        },
+    )
+    assert response.status_code == 403

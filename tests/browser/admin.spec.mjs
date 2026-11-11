@@ -53,6 +53,38 @@ test('fresh installation: real HTTP, bootstrap, administration, scoped keys and 
   expect(models.status()).toBe(200);
   expect((await models.json()).data).toEqual([]); // No configured providers, no external model calls.
 
+  if (process.env.MOCK_PROVIDER_URL) {
+    await create('providers', {
+      name: 'Disposable TLS mock', base_url: process.env.MOCK_PROVIDER_URL,
+      api_key: 'integration-only-not-a-real-key',
+      models: '{"smoke-only":{"upstream_model":"mock-model","input_cost_per_million":1,"output_cost_per_million":2}}',
+    });
+    await expect(page.locator('#field-api_key')).toHaveValue('');
+    const chat = await request.post('/v1/chat/completions', { headers, data: {
+      model: 'smoke-only', messages: [{ role: 'user', content: 'Integration test' }], max_completion_tokens: 20,
+    } });
+    expect(chat.status()).toBe(200);
+    expect((await chat.json()).choices[0].message.content).toBe('Mock upstream response');
+    expect(chat.headers()['x-provider-request-id']).toBe('mock-upstream-123');
+    expect(chat.headers()['x-reservation-id']).toBeTruthy();
+    const stream = await request.post('/v1/chat/completions', { headers, data: {
+      model: 'smoke-only', messages: [{ role: 'user', content: 'Integration stream' }], max_tokens: 20, stream: true,
+    } });
+    expect(stream.status()).toBe(200);
+    const events = await stream.text();
+    expect(events).toContain('Mock upstream response');
+    expect(events).toContain('data: [DONE]');
+    const embedding = await request.post('/v1/embeddings', { headers, data: { model: 'smoke-only', input: 'Integration embedding' } });
+    expect(embedding.status()).toBe(200);
+    expect((await embedding.json()).data[0].embedding).toEqual([0.1, 0.2, 0.3]);
+    const usage = await request.get('/admin/api/usage', { headers: { Authorization: `Bearer ${adminKey}` } });
+    const records = await usage.json();
+    expect(records).toHaveLength(3);
+    expect(records.every(row => row.estimated === false)).toBe(true);
+    expect(records.reduce((sum, row) => sum + row.cost_micros, 0)).toBe(17);
+    await page.locator('[data-view="keys"]').click();
+  }
+
   const keyRow = page.locator('tbody tr').filter({ hasText: 'browser-client' });
   page.once('dialog', dialog => dialog.accept());
   await keyRow.getByRole('button', { name: 'Rotate', exact: true }).click();
@@ -73,10 +105,32 @@ test('fresh installation: real HTTP, bootstrap, administration, scoped keys and 
   await page.locator('[data-view="audit"]').click();
   await expect(page.locator('tbody')).toContainText('key.rotate');
   await expect(page.locator('tbody')).toContainText('team.create');
+  await page.locator('[data-view="prompts"]').click();
+  await page.getByLabel('Template name', { exact: true }).fill('Browser prompt registry');
+  await page.getByLabel('Initial template content', { exact: true }).fill('Hello {{name}} <script>not executed</script>');
+  await page.getByRole('button', { name: 'Save new template', exact: true }).click();
+  await expect(page.locator('#prompt-version-content')).toContainText('Hello {{name}}');
+  await expect(page.locator('#prompt-version-content script')).toHaveCount(0);
+  await page.getByLabel('Variable values (JSON object)', { exact: true }).fill('{"name":"World"}');
+  await page.getByRole('button', { name: 'Render preview', exact: true }).click();
+  await expect(page.locator('#prompt-preview')).toContainText('Hello World <script>not executed</script>');
+  await expect(page.locator('#prompt-preview script')).toHaveCount(0);
+  await page.getByLabel('New version content', { exact: true }).fill('Version two {{name}}');
+  await page.getByRole('button', { name: 'Append immutable version', exact: true }).click();
+  await expect(page.locator('#prompt-version')).toHaveValue('2');
+  await expect(page.locator('#prompt-version-content')).toHaveText('Version two {{name}}');
+  await page.getByRole('button', { name: 'Evaluate and save report', exact: true }).click();
+  await expect(page.locator('#prompt-reports')).toContainText('"pass_rate": 1');
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Archive template', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Append immutable version', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Restore template', exact: true })).toBeVisible();
   // Durable credentials must not be stashed in browser storage.
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.locator('#workspace')).toBeHidden();
+  await expect(page.locator('#prompt-version-content')).toBeEmpty();
+  await expect(page.locator('#prompt-content')).toHaveValue('');
   await expect(page.locator('#identity')).toHaveText('Not signed in');
   await page.reload();
   await expect(page.locator('#workspace')).toBeHidden();

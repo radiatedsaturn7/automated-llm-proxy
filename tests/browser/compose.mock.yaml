@@ -1,0 +1,27 @@
+# Must be combined with root compose.yaml. Never use this override in production.
+services:
+  mock-provider:
+    image: python:3.12-slim
+    command: [python, /mock/server.py]
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./tests/browser/mock-provider/server.py:/mock/server.py:ro
+      - ./tests/browser/mock-provider/tls:/tls:ro
+    healthcheck:
+      test: [CMD, python, -c, "import ssl,urllib.request; urllib.request.urlopen('https://mock-provider:8443/health', context=ssl.create_default_context(cafile='/tls/server.crt'), timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+  gateway:
+    image: automated-llm-proxy:smoke
+    build:
+      context: .
+      dockerfile: tests/browser/mock-provider/Dockerfile.gateway
+    environment:
+      ALLOW_PRIVATE_PROVIDER_HOSTS: 'true'
+    depends_on:
+      mock-provider:
+        condition: service_healthy

@@ -30,6 +30,10 @@ jobs:
       - run: terraform -chdir=deploy/terraform init -backend=false
       - run: terraform -chdir=deploy/terraform validate
       - run: docker build -t automated-llm-proxy:ci .
+      - name: Validate Prometheus alert rules
+        run: docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/rules:ro" prom/prometheus:v3.2.1 check rules /rules/prometheus-alerts.yaml
+      - name: Validate Grafana dashboard structure
+        run: python tests/browser/check-monitoring.py
 
   postgres-tests:
     runs-on: ubuntu-latest
@@ -57,6 +61,9 @@ jobs:
   compose-browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      COMPOSE_FILE: compose.yaml:tests/browser/compose.mock.yaml
+      MOCK_PROVIDER_URL: https://mock-provider:8443/v1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -90,7 +97,11 @@ jobs:
                   env.write(f'{name}={value}\n')
                   github_env.write(f'{name}={value}\n')
           PY
-      - name: Start actual image, migration job and PostgreSQL
+      - name: Build production image and disposable TLS test trust
+        run: |
+          sh tests/browser/mock-provider/generate-tls.sh
+          docker build -t automated-llm-proxy:local .
+      - name: Start image, migration, PostgreSQL and TLS mock upstream
         run: docker compose up --build --wait --wait-timeout 180 gateway
       - name: Exercise admin UI and HTTP authorization without paid providers
         run: npm test --prefix tests/browser
@@ -105,4 +116,4 @@ jobs:
         if: always()
         run: |
           if [ -f .env ]; then docker compose down --volumes --remove-orphans || true; fi
-          rm -f .env
+          rm -f .env tests/browser/mock-provider/tls/server.key tests/browser/mock-provider/tls/server.crt

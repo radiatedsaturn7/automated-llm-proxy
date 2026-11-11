@@ -18,3 +18,8 @@ htmlcov
 .coverage
 build
 dist
+
+# Local/browser dependencies are not application build inputs.
+node_modules
+test-results
+playwright-report

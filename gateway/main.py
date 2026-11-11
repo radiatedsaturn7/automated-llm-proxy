@@ -13,7 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from . import admin, auth, db, inference, scim
+from . import account, admin, auth, db, inference, prompts, scim
 from .config import get_settings
 from .observability import ObservabilityMiddleware
 
@@ -67,6 +67,8 @@ class BodyLimitMiddleware:
 
 app = FastAPI(title="Thunderbolt", version="0.1.0", lifespan=lifespan)
 app.add_middleware(BodyLimitMiddleware)
+app.include_router(prompts.router)
+app.include_router(account.router)
 app.include_router(scim.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
@@ -138,3 +140,8 @@ async def admin_page():
 
 # Registered last so body limits, auth errors and security-header middleware are observed.
 app.add_middleware(ObservabilityMiddleware)
+
+
+@app.get("/portal", include_in_schema=False)
+async def user_portal():
+    return FileResponse(Path(__file__).parent / "static" / "portal.html")

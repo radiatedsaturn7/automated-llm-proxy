@@ -3,7 +3,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, select, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -139,6 +139,37 @@ class BrowserSession(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     csrf: Mapped[str] = mapped_column(String(128))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PromptTemplate(Base):
+    __tablename__ = "prompt_templates"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PromptVersion(Base):
+    __tablename__ = "prompt_versions"
+    __table_args__ = (UniqueConstraint("template_id", "version"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    template_id: Mapped[str] = mapped_column(ForeignKey("prompt_templates.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    variables: Mapped[list] = mapped_column(JSON)
+    created_by: Mapped[str] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class EvaluationRun(Base):
+    __tablename__ = "evaluation_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    prompt_version_id: Mapped[str] = mapped_column(ForeignKey("prompt_versions.id"), index=True)
+    rules: Mapped[list] = mapped_column(JSON)
+    report: Mapped[dict] = mapped_column(JSON)
+    created_by: Mapped[str] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 engine = None

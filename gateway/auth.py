@@ -67,7 +67,7 @@ async def logout(request: Request):
             if row:
                 await s.delete(row)
         await db.audit(s, identity.user.id, "session.logout")
-    response = RedirectResponse("/admin", status_code=303)
+    response = RedirectResponse("/admin" if identity.user.role == "admin" else "/portal", status_code=303)
     response.delete_cookie("gateway_session", path="/")
     return response
 
@@ -262,7 +262,7 @@ async def oidc_callback(request: Request, state: str = "", code: str = ""):
         s.add(db.BrowserSession(digest=digest(raw), user_id=user.id, csrf=secrets.token_urlsafe(32),
                                expires_at=db.now() + timedelta(seconds=cfg.oidc_session_seconds)))
         await db.audit(s, user.id, "oidc.login")
-    response = RedirectResponse("/admin", status_code=303)
+    response = RedirectResponse("/admin" if user.role == "admin" else "/portal", status_code=303)
     response.set_cookie("gateway_session", raw, httponly=True, secure=cfg.public_url.startswith("https://"),
                         samesite="lax", max_age=cfg.oidc_session_seconds, path="/")
     response.delete_cookie("gateway_oidc_state", path="/auth/oidc")

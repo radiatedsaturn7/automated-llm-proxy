@@ -10,9 +10,9 @@ This is a working foundation under active development, **not** a fully enterpris
 | Provider abstraction | OpenAI-compatible, Azure OpenAI v1 and Anthropic text adapters | Not full vendor API parity; validate supported request types |
 | Spending control | Shared reservations and UTC monthly accounting | Prices operator-maintained; crash reconciliation required; not invoice reconciliation |
 | SSO | OIDC with explicit group mapping and browser sessions | SCIM Users/Groups provisioning subset and explicit offboarding; no SAML, local passwords or IdP certification |
-| Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Advanced edits through API; no delegated end-user portal |
+| Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Member portal manages own existing credentials; no arbitrary delegated team-admin roles |
 | Local relay | Authenticated loopback forwarding and short-lived access-token renewal | Does not rotate provider keys or its long-lived agent credential automatically |
-| Evaluation | Bounded deterministic checks of supplied outputs | No automatic model calls, LLM judges, prompt registry or experiment dashboard |
+| Evaluation | Bounded deterministic checks of supplied outputs | Immutable prompt registry and saved offline evaluation reports; no automatic model calls or LLM judges |
 | Deployment | Container and deployment examples for simple and replicated setups | Infrastructure must be supplied/validated; examples are not certification |
 | Audit | Administrative and usage metadata in database | No immutable audit storage, retention scheduler or SIEM delivery guarantee |
 | Monitoring | Health/readiness and metrics integration in application/deployment | Correlation IDs, bounded route metrics, structured metadata logs, example dashboards/alerts; SLO ownership remains operator work |

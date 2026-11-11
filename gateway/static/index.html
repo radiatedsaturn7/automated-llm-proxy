@@ -29,6 +29,7 @@
         <button type="button" data-view="providers">Providers</button>
         <button type="button" data-view="keys">API keys</button>
         <button type="button" data-view="audit">Audit</button>
+        <button type="button" data-view="prompts">Prompt registry</button>
         <button type="button" data-view="evaluation">Evaluation</button>
         <button type="button" id="revoke-all-sessions" class="danger">Revoke all browser sessions</button>
         <button type="button" id="disconnect">Sign out</button>
@@ -39,6 +40,17 @@
         <section id="summary" class="card" hidden></section>
         <div id="table-wrap" class="card table-wrap"></div>
         <section id="editor" class="card" hidden><h2 id="editor-title">Create</h2><form id="resource-form"></form></section>
+        <section id="prompts" hidden>
+          <div class="card"><h2>Explicitly stored prompt templates</h2><p>Templates are stored in plaintext in the database. Do not enter secrets. This does not log inference prompts or call a model. Saved evaluation reports contain deterministic results, not case text.</p>
+            <form id="prompt-create-form"><label for="prompt-name">Template name</label><input id="prompt-name" required maxlength="120"><label for="prompt-content">Initial template content</label><textarea id="prompt-content" required maxlength="32768" rows="5" placeholder="Hello {{name}}"></textarea><button type="submit">Save new template</button></form>
+          </div>
+          <div class="card"><h2>Templates and immutable versions</h2><p>Showing up to 100 templates/versions. Use the API for larger registries.</p><label for="prompt-template">Stored template</label><select id="prompt-template"></select><button id="prompt-archive" type="button" class="danger">Archive template</button>
+            <label for="prompt-version">Stored version</label><select id="prompt-version"></select><pre id="prompt-version-content" aria-label="Stored prompt content" tabindex="0"></pre>
+            <form id="prompt-version-form"><label for="prompt-next-content">New version content</label><textarea id="prompt-next-content" required maxlength="32768" rows="5"></textarea><button type="submit">Append immutable version</button></form>
+          </div>
+          <div class="card"><h2>Preview selected version</h2><form id="prompt-render-form"><label for="prompt-variables">Variable values (JSON object)</label><textarea id="prompt-variables" rows="4">{}</textarea><button type="submit">Render preview</button></form><pre id="prompt-preview" aria-label="Rendered preview" tabindex="0"></pre></div>
+          <div class="card"><h2>Evaluate selected version</h2><p>Supply already-generated outputs. No paid model call is made. The resulting report is saved.</p><form id="prompt-evaluate-form"><label for="prompt-cases">Saved-report evaluation cases (JSON array)</label><textarea id="prompt-cases" rows="5">[{"output":"Hello","expected":"Hello"}]</textarea><label for="prompt-rules">Saved-report rules (JSON array)</label><textarea id="prompt-rules" rows="2">["exact_match"]</textarea><button type="submit">Evaluate and save report</button></form><h3>Saved reports for selected version</h3><pre id="prompt-reports" tabindex="0"></pre></div>
+        </section>
         <section id="evaluation" class="card" hidden>
           <h2>Evaluate saved outputs</h2><p>Deterministic checks only. This does not call a model or store a prompt dataset.</p>
           <form id="evaluation-form">

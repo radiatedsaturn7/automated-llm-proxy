@@ -184,9 +184,11 @@ migration container, waits for readiness, and uses Chromium/Playwright against
 the served admin UI. It bootstraps a disposable installation, logs in, creates a
 team, user and scoped API key, rotates/revokes that key, checks member/admin access
 separation, lists models, runs an offline evaluation, checks audit records, and
-signs out. No provider is configured and no paid inference request is made. This
-complements adapter/streaming mock tests; it does not test a real identity provider,
-external model service, browser SSO, load, or Kubernetes failover.
+signs out. CI additionally starts a deterministic local HTTPS mock provider and
+makes real gateway chat, streaming and embedding requests with usage accounting.
+No paid inference request is made. This complements adapter unit tests; it does not
+test a real identity provider, external model service, browser SSO, load, or
+Kubernetes failover.
 
 To run locally, use a **fresh disposable database**, start Compose using the setup
 above, and export the same `BOOTSTRAP_TOKEN` into the test process:
@@ -208,3 +210,28 @@ Browser traces, videos and screenshots are disabled to avoid preserving one-time
 administrator credentials. Test secrets are generated per run, masked in CI, and
 never committed. The application image's nonroot/read-only settings remain enabled
 throughout this test. A passing smoke test is not a production-readiness guarantee.
+
+### Optional local upstream integration
+
+The CI-only `tests/browser/compose.mock.yaml` override adds an unprivileged HTTPS
+mock provider. It creates a disposable self-signed certificate and builds a derived
+test gateway image that trusts that certificate. The production image, its TLS
+verification, and its trust roots are not modified. To reproduce on a fresh test
+database after generating/exporting installation secrets:
+
+```sh
+sh tests/browser/mock-provider/generate-tls.sh
+docker build -t automated-llm-proxy:local .
+export COMPOSE_FILE=compose.yaml:tests/browser/compose.mock.yaml
+docker compose up --build --wait --wait-timeout 180 gateway
+MOCK_PROVIDER_URL=https://mock-provider:8443/v1 npm test --prefix tests/browser
+```
+
+Never deploy this override, its generated key/certificate, or the derived
+`automated-llm-proxy:smoke` image to production. The override explicitly enables
+private provider addresses for the isolated test network. Generated TLS files are
+git-ignored; the dummy upstream credential authorizes only this fixture.
+
+CI also runs `promtool check rules` using the official Prometheus image and a
+stdlib JSON structural check of the Grafana dashboard. These validate committed
+configuration, not live alert firing or dashboard rendering against production data.

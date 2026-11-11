@@ -95,6 +95,129 @@
           "maximum": 1800
         }
       }
+    },
+    "maintenance": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "suspend",
+        "schedule",
+        "resources",
+        "batchSize",
+        "startingDeadlineSeconds",
+        "activeDeadlineSeconds",
+        "backoffLimit",
+        "successfulJobsHistoryLimit",
+        "failedJobsHistoryLimit",
+        "ttlSecondsAfterFinished"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "suspend": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 120,
+          "pattern": "^\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+$"
+        },
+        "resources": {
+          "type": "object"
+        },
+        "batchSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "startingDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 86400
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 3600
+        },
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "successfulJobsHistoryLimit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "failedJobsHistoryLimit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "ttlSecondsAfterFinished": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 604800
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "required": [
+        "poolSize",
+        "maxOverflow",
+        "poolTimeoutSeconds",
+        "poolRecycleSeconds",
+        "statementTimeoutMs",
+        "lockTimeoutMs",
+        "migrationStatementTimeoutMs",
+        "migrationLockTimeoutMs"
+      ],
+      "properties": {
+        "poolSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "maxOverflow": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "poolTimeoutSeconds": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 120
+        },
+        "poolRecycleSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        },
+        "statementTimeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 600000
+        },
+        "lockTimeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 600000
+        },
+        "migrationStatementTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "migrationLockTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        }
+      }
     }
   }
 }

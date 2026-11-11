@@ -97,3 +97,12 @@ Only credential digests are stored server-side. Prior access JWTs without a gene
 claim are treated as generation zero until expiry or the first root rotation fences
 them. Existing keys retain IDs, secrets, permissions and expiry. The opt-in relay
 journal requires local durable secret storage; see [local-relay.md](local-relay.md).
+
+## Revision 7: accounting and lifecycle indexes
+
+Revision 7 replaces redundant prefix indexes with composite budget/export indexes
+and adds targeted credential/session lifecycle access paths. It does not change
+records or accounting. Creation is transactional, **not concurrent/online**; plan
+a maintenance window and disk capacity for large tables. See
+[database-indexes.md](database-indexes.md) for rationale, remaining query limits,
+and PostgreSQL plan verification.

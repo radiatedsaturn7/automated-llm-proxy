@@ -3,7 +3,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, select, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -77,6 +77,7 @@ class ProviderHealth(Base):
 
 class APIKey(Base):
     __tablename__ = "api_keys"
+    __table_args__ = (Index("ix_api_keys_user_created_id", "user_id", "created_at", "id"),)
     generation: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     last_rotation_operation: Mapped[str | None] = mapped_column(String(36), nullable=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
@@ -106,9 +107,11 @@ class AgentRotation(Base):
 
 class Reservation(Base):
     __tablename__ = "reservations"
+    __table_args__ = (Index("ix_reservations_user_period_status", "user_id", "period", "status"),
+                      Index("ix_reservations_team_period_status", "team_id", "period", "status"))
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    user_id: Mapped[str] = mapped_column(String(36), index=True)
-    team_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(36))
+    team_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     key_id: Mapped[str] = mapped_column(String(36))
     period: Mapped[str] = mapped_column(String(7), index=True)
     amount_micros: Mapped[int] = mapped_column(BigInteger)
@@ -119,10 +122,13 @@ class Reservation(Base):
 
 class Usage(Base):
     __tablename__ = "usage"
+    __table_args__ = (Index("ix_usage_user_period", "user_id", "period"),
+                      Index("ix_usage_team_period", "team_id", "period"),
+                      Index("ix_usage_created_id", "created_at", "id"))
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     reservation_id: Mapped[str] = mapped_column(String(36), unique=True)
-    user_id: Mapped[str] = mapped_column(String(36), index=True)
-    team_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(36))
+    team_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     key_id: Mapped[str] = mapped_column(String(36))
     model: Mapped[str] = mapped_column(String(128))
     provider_id: Mapped[str] = mapped_column(String(36))
@@ -143,16 +149,18 @@ class RateBucket(Base):
 
 class Audit(Base):
     __tablename__ = "audit"
+    __table_args__ = (Index("ix_audit_created_id", "created_at", "id"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     actor_id: Mapped[str] = mapped_column(String(128))
     action: Mapped[str] = mapped_column(String(80))
     target_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     details: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class OIDCState(Base):
     __tablename__ = "oidc_states"
+    __table_args__ = (Index("ix_oidc_states_expiry_digest", "expires_at", "digest"),)
     digest: Mapped[str] = mapped_column(String(64), primary_key=True)
     nonce: Mapped[str] = mapped_column(String(128))
     verifier: Mapped[str] = mapped_column(String(128))
@@ -161,6 +169,8 @@ class OIDCState(Base):
 
 class BrowserSession(Base):
     __tablename__ = "browser_sessions"
+    __table_args__ = (Index("ix_browser_sessions_expiry_digest", "expires_at", "digest"),
+                      Index("ix_browser_sessions_user", "user_id"))
     digest: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     csrf: Mapped[str] = mapped_column(String(128))
@@ -210,7 +220,16 @@ def init_engine(url=None):
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"timeout": 30}
     else:
-        kwargs.update(pool_size=10, max_overflow=20, isolation_level="READ COMMITTED")
+        settings = get_settings()
+        kwargs.update(
+            pool_size=settings.db_pool_size, max_overflow=settings.db_max_overflow,
+            pool_timeout=settings.db_pool_timeout_seconds, pool_recycle=settings.db_pool_recycle_seconds,
+            isolation_level="READ COMMITTED",
+            connect_args={"server_settings": {
+                "statement_timeout": str(settings.db_statement_timeout_ms),
+                "lock_timeout": str(settings.db_lock_timeout_ms),
+            }},
+        )
     engine = create_async_engine(url, **kwargs)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return engine

@@ -251,3 +251,31 @@ and overlap a replacement probe. Epoch fencing prevents a stale result from
 changing the newer circuit. No dispatched inference request is retried. See
 [provider health operations](../docs/provider-health.md) for shared database
 state, fallback behavior, reset endpoints and limitations.
+
+### PostgreSQL connection and query limits
+
+`database` Helm values map to `DB_POOL_SIZE` (10), `DB_MAX_OVERFLOW` (20),
+`DB_POOL_TIMEOUT_SECONDS` (30), `DB_POOL_RECYCLE_SECONDS` (1800),
+`DB_STATEMENT_TIMEOUT_MS` (30000) and `DB_LOCK_TIMEOUT_MS` (5000). Limits apply per
+application process. Plan `(poolSize + maxOverflow) × maximum replicas × workers`,
+plus migration, maintenance, monitoring and administrative connections, below the
+PostgreSQL connection budget. Overflow is bounded and may be zero; pool size may
+not be zero (which SQLAlchemy otherwise treats as unbounded). SQLite ignores these
+production pool knobs.
+
+Runtime PostgreSQL connections enforce statement and lock deadlines, including
+read-only authentication queries. Lock timeout must not exceed statement timeout.
+Pool exhaustion and SQL timeouts fail closed with a sanitized HTTP 503; there is
+no automatic transaction or provider-request replay. Limits are per statement or
+lock acquisition, not a whole-request deadline. If accounting finalization fails,
+the existing pending reservation remains conservatively charged for explicit
+reconciliation. Do not use automatic retries to hide an uncertain commit.
+
+Migration transactions override both deadlines independently through
+`DB_MIGRATION_STATEMENT_TIMEOUT_MS` and `DB_MIGRATION_LOCK_TIMEOUT_MS` (Helm
+`database.migrationStatementTimeoutMs` and `migrationLockTimeoutMs`). Both default
+to zero/unlimited to permit reviewed long-running schema upgrades and advisory-lock
+waits. Overrides are transaction-local and reset before that connection returns to
+the runtime pool, including programmatic migrations. Operators may set bounded
+migration deadlines, but must allow enough time for populated-table index builds.
+Tune against measured contention and database capacity, not just replica count.

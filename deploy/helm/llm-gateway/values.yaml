@@ -77,3 +77,30 @@ networkPolicy:
             matchLabels: {app.kubernetes.io/name: postgresql}
       ports:
         - {protocol: TCP, port: 5432}
+
+# Optional bounded cleanup of expired login/session/rate-limit transient records.
+maintenance:
+  enabled: false
+  suspend: false
+  schedule: '17 * * * *' # UTC; Kubernetes 1.27+ for timeZone.
+  batchSize: 1000 # Per table, per run; no unbounded catch-up loop.
+  startingDeadlineSeconds: 300
+  activeDeadlineSeconds: 300
+  backoffLimit: 1
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  ttlSecondsAfterFinished: 86400
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+
+# Per application process; budget total connections across maximum HPA replicas.
+database:
+  poolSize: 10
+  maxOverflow: 20
+  poolTimeoutSeconds: 30
+  poolRecycleSeconds: 1800
+  statementTimeoutMs: 30000
+  lockTimeoutMs: 5000
+  migrationStatementTimeoutMs: 0
+  migrationLockTimeoutMs: 0

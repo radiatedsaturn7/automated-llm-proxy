@@ -2,16 +2,23 @@ import asyncio
 import os
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from gateway import db
+from gateway.config import get_settings
 from gateway.migrate import MigrationError, downgrade, migrate, versions, version_metadata
 from gateway.migrations import HEAD, v0001
 
 
 @pytest.fixture
 async def migration_engine(tmp_path, monkeypatch):
+    monkeypatch.setenv("GATEWAY_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("GATEWAY_SIGNING_KEY", "migration-test-" + "x" * 40)
+    monkeypatch.setenv("BOOTSTRAP_TOKEN", "migration-test-" + "x" * 40)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    get_settings.cache_clear()
     url = os.environ.get("TEST_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/migration.db")
     kwargs = {"connect_args": {"timeout": 30}} if url.startswith("sqlite") else {}
     engine = create_async_engine(url, **kwargs)
@@ -22,6 +29,7 @@ async def migration_engine(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "engine", engine)
     yield engine
     await engine.dispose()
+    get_settings.cache_clear()
 
 
 async def table_names(engine):
@@ -191,3 +199,26 @@ async def test_v4_backfills_legacy_authority_and_preserves_key_data(migration_en
             assert row["permissions"] == expected
             assert row["allowed_models"] == ["restricted-model"] and row["rpm"] == 17
             assert row["digest"] == row["id"] and row["prefix"] == "old-prefix"
+
+
+async def test_v7_index_upgrade_preserves_accounting(migration_engine):
+    from datetime import datetime, timezone
+    from gateway.migrations import v0006
+    async with migration_engine.begin() as conn:
+        await conn.run_sync(v0006.metadata.create_all)
+        await conn.execute(v0006.metadata.tables["policy_lock"].insert().values(id=1))
+        await conn.run_sync(version_metadata.create_all)
+        for number in range(1, 7):
+            await conn.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
+        await conn.execute(v0006.metadata.tables["usage"].insert().values(
+            id="usage-preserve", reservation_id="r-preserve", user_id="u", team_id="t", key_id="k",
+            model="m", provider_id="p", period="2026-11", input_tokens=13, output_tokens=2,
+            cost_micros=17, estimated=False, created_at=datetime.now(timezone.utc)))
+        await conn.execute(v0006.metadata.tables["reservations"].insert().values(
+            id="pending-preserve", user_id="u", team_id="t", key_id="k", period="2026-11",
+            amount_micros=100, status="pending", created_at=datetime.now(timezone.utc)))
+    assert await migrate() == HEAD
+    async with migration_engine.connect() as conn:
+        assert (await conn.execute(select(db.Usage.cost_micros))).scalars().all() == [17]
+        assert (await conn.execute(select(db.Reservation.amount_micros))).scalars().all() == [100]
+    assert await migrate() == HEAD

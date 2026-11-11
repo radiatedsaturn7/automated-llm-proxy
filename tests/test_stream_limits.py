@@ -1,6 +1,7 @@
 """Bound endless native/compatible provider streams without real provider calls."""
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -408,3 +409,35 @@ async def test_lifespan_drains_tasks_spawned_after_first_snapshot(monkeypatch):
     release.set()
     await asyncio.wait_for(shutdown, 1)
     assert fake_db.dispose.await_count == 1
+
+
+async def test_newline_dense_single_chunk_yields_to_other_tasks():
+    translator = providers.StreamTranslator(PROVIDER, 'chat')
+    translator.deadline = time.monotonic() + 300
+    response = httpx.Response(200, content=b'\n' * 65536 + b'data: tail')
+    ticks = 0
+    stop = False
+
+    async def ticker():
+        nonlocal ticks
+        while not stop:
+            ticks += 1
+            await asyncio.sleep(0)
+
+    task = asyncio.create_task(ticker())
+    try:
+        lines = [line async for line in translator.bounded_lines(response)]
+    finally:
+        stop = True
+        await task
+    assert len(lines) == 65537
+    assert lines[-1] == 'data: tail'
+    assert ticks >= 256
+
+
+async def test_dense_lines_preserve_split_partial_line():
+    translator = providers.StreamTranslator(PROVIDER, 'chat')
+    translator.deadline = time.monotonic() + 300
+    response = httpx.Response(200, stream=ScriptedStream([b'\n'*4096+b'par', b'tial\r\nlast']))
+    lines = [line async for line in translator.bounded_lines(response)]
+    assert lines == [''] * 4096 + ['partial', 'last']

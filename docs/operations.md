@@ -59,3 +59,61 @@ This is a cheap routing probe, not a full schema-drift inspection; run the
 read-only preflight above before admitting a release. Plan schema upgrades with
 a maintenance window unless the specific migration documents rolling-version
 compatibility. No migration runs automatically on application startup.
+
+Configuration fails closed on unknown `ENVIRONMENT` values: only `development`
+and `production` are accepted. Do not use aliases such as `prod` or `staging`;
+use production mode for staging installations needing production safeguards.
+`PUBLIC_URL` must have an HTTP(S) hostname and cannot contain credentials, query
+parameters or fragments. Production still requires HTTPS and PostgreSQL.
+
+## Bounded two-replica acceptance drill
+
+CI runs `tests/ops/replica_drill.py` against a fresh, isolated Compose project after
+browser acceptance. It starts two actual gateway processes sharing one PostgreSQL
+service and a test-only TLS upstream. The fixture is bounded: 40 simultaneous
+cross-user/team-budget requests, 32 cross-replica requests sharing a six-RPM key,
+one deliberately interrupted request, and eight survivor/recovery requests.
+Expected 429 rejections are reported separately from successes. The harness verifies
+held reservations cannot exceed the shared team budget, one shared rate window
+admits exactly six requests, settled usage is counted once, and no duplicate
+upstream dispatch occurs.
+
+A worker is killed with SIGKILL only after the simulated upstream records its
+request. Its pending reservation must remain charged, a retry against the exhausted
+budget must not dispatch, and an independent key must still work on the surviving
+worker. The killed container is restarted and both workers are exercised again.
+This proves explicit client selection of the surviving replica, not automatic
+load-balancer failover. It does not refund or replay uncertain generations.
+
+The emitted JSON includes per-phase status counts and nearest-rank p50/p95/p99
+latencies, successful-only latencies, accounting invariants and point-in-time Docker
+CPU/memory/PID snapshots. These snapshots are not peak resource measurements.
+Latency includes the deliberately held upstream in the budget phase. Results are
+functional acceptance evidence on disposable CI hardware, not enterprise capacity,
+availability, latency or recovery-time guarantees. Database failover, network
+partitions and multi-region operation are not tested by this drill.
+
+Operators may run the same bounded test on a disposable local machine with Docker
+Compose 2.24.4+ (for `!override`) and Python 3.12. Never point it at a production
+installation. Prepare disposable `.env` secrets as in the Compose quickstart,
+build `automated-llm-proxy:local`, generate the test TLS fixture with
+`sh tests/browser/mock-provider/generate-tls.sh`, and then run:
+
+```sh
+export COMPOSE_FILE=compose.yaml:tests/browser/compose.mock.yaml:tests/ops/compose.replicas.yaml
+export COMPOSE_PROJECT_NAME=thunderbolt-replica-drill
+# Environment must contain the same disposable BOOTSTRAP_TOKEN used by Compose.
+# Do not print or paste that token into logs.
+trap 'docker compose down --volumes --remove-orphans' EXIT
+docker compose up --build -d --wait --wait-timeout 180 gateway gateway-peer
+DISPOSABLE_REPLICA_DRILL=1 python tests/ops/replica_drill.py
+```
+
+The script refuses a different project name or Compose configuration and only sends
+HTTP to fixed loopback ports 8180/8181. It requires a fresh database (bootstrap must
+succeed), never accepts arbitrary remote target URLs, and emits no API credentials
+or response contents. The test mock has unauthenticated hold/release controls within
+the disposable network only; never use its override in a real deployment. CI removes
+the test project, volumes and TLS secrets even on failure. Normal pytest only tests
+harness safety/format/control contracts; actual two-container evidence comes from
+the explicit Compose acceptance step.

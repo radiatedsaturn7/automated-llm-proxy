@@ -631,12 +631,25 @@ class StreamTranslator:
                 self.complete = False
                 raise ValueError("Upstream stream byte limit exceeded")
             pending.extend(chunk)
-            while b"\n" in pending:
-                line, _, rest = pending.partition(b"\n")
-                pending = bytearray(rest)
-                if len(line) > 1_048_576:
+            offset = 0
+            lines = 0
+            while True:
+                end = pending.find(b"\n", offset)
+                if end < 0:
+                    break
+                if end - offset > 1_048_576:
                     raise ValueError("Upstream line too large")
+                line = pending[offset:end]
+                offset = end + 1
+                lines += 1
+                # A transport can deliver thousands of blank/comment lines in
+                # one chunk. Yield fairly even when the parser emits no events.
+                if lines % 256 == 0:
+                    await asyncio.sleep(0)
+                    self.remaining()
                 yield line.rstrip(b"\r").decode("utf-8")
+            if offset:
+                del pending[:offset]
             if len(pending) > 1_048_576:
                 raise ValueError("Upstream line too large")
         if pending:

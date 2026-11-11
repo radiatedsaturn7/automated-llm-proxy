@@ -119,6 +119,16 @@ jobs:
         run: npm test --prefix tests/browser
       - name: Verify schema and provider credential preflight
         run: docker compose exec -T gateway python -m gateway.check
+      - name: Verify bounded load and worker loss across two replicas
+        timeout-minutes: 7
+        shell: bash
+        run: |
+          docker compose down --volumes --remove-orphans
+          export COMPOSE_FILE=compose.yaml:tests/browser/compose.mock.yaml:tests/ops/compose.replicas.yaml
+          export COMPOSE_PROJECT_NAME=thunderbolt-replica-drill
+          trap 'docker compose down --volumes --remove-orphans' EXIT
+          docker compose up -d --wait --wait-timeout 180 gateway gateway-peer
+          DISPOSABLE_REPLICA_DRILL=1 python tests/ops/replica_drill.py
       - name: Show service status and diagnostics on failure
         if: failure()
         run: |
@@ -130,4 +140,7 @@ jobs:
         if: always()
         run: |
           if [ -f .env ]; then docker compose down --volumes --remove-orphans || true; fi
+          if [ -f .env ]; then
+            COMPOSE_FILE=compose.yaml:tests/browser/compose.mock.yaml:tests/ops/compose.replicas.yaml COMPOSE_PROJECT_NAME=thunderbolt-replica-drill docker compose down --volumes --remove-orphans || true
+          fi
           rm -f .env tests/browser/mock-provider/tls/server.key tests/browser/mock-provider/tls/server.crt

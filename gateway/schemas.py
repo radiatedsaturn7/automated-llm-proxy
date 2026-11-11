@@ -70,6 +70,12 @@ class ProviderPatch(Strict):
     priority: int | None = Field(default=None, ge=0, le=1000)
 
 
+    @field_validator("models")
+    @classmethod
+    def models_valid(cls, value):
+        return None if value is None else ProviderCreate.models_valid(value)
+
+
 class KeyCreate(Strict):
     name: str = Field(min_length=1, max_length=120)
     user_id: str
@@ -89,3 +95,20 @@ class Bootstrap(Strict):
 class EvaluationRequest(Strict):
     cases: list[dict] = Field(min_length=1, max_length=100)
     rules: list[str] = Field(default_factory=lambda: ["exact_match"], max_length=10)
+
+
+class IdentityLink(Strict):
+    issuer: str = Field(min_length=1, max_length=400)
+    subject: str = Field(min_length=1, max_length=255)
+    identity_verified: Literal[True]
+
+    @field_validator("issuer", "subject")
+    @classmethod
+    def exact_identifier(cls, value):
+        if value != value.strip() or any(ord(c) < 32 for c in value):
+            raise ValueError("Identity identifiers must not contain whitespace padding or control characters")
+        return value
+
+
+class SessionRevocation(Strict):
+    confirm: Literal[True]

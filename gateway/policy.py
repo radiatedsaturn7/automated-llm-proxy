@@ -75,7 +75,7 @@ async def finalize(reservation_id, model, provider_id, route, usage=None, releas
         if isinstance(usage, dict):
             inp = usage.get("prompt_tokens", usage.get("input_tokens"))
             out = usage.get("completion_tokens", usage.get("output_tokens", 0))
-            if isinstance(inp, int) and not isinstance(inp, bool) and isinstance(out, int) and not isinstance(out, bool) and inp >= 0 and out >= 0:
+            if isinstance(inp, int) and not isinstance(inp, bool) and isinstance(out, int) and not isinstance(out, bool) and 0 <= inp <= 2_147_483_647 and 0 <= out <= 2_147_483_647:
                 estimated = False
             else:
                 inp, out = 0, 0

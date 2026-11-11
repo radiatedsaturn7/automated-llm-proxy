@@ -1,4 +1,8 @@
-# Automated LLM Proxy
+# Thunderbolt
+
+**Brrrrt it into production**
+
+![Thunderbolt A-10 shark-mouth artwork](gateway/static/thunderbolt-banner.png)
 
 Apache-2.0 LLM gateway with a stateless application tier and external SQL policy/accounting state. An initial implementation for evaluation and hardening, **not a claim of production readiness or compliance certification**.
 
@@ -42,6 +46,8 @@ uv run ruff check .
 ## Deployment and guides
 
 - [Deployment, Compose, Helm, Terraform](deploy/README.md)
+- [Versioned migrations and legacy adoption](docs/migrations.md)
+- [Operational cleanup and recovery](docs/operations.md)
 - [Architecture and accounting semantics](docs/architecture.md)
 - [Security model and production checklist](docs/security.md)
 - [Feature matrix, research and roadmap](docs/feature-matrix.md)
@@ -54,7 +60,7 @@ Budgets are admission controls using conservative reservations and provider-repo
 
 OIDC groups are refreshed on login, not continuously. Sessions last up to eight hours; disable a user for immediate gateway revocation. No built-in password authentication, SAML, SCIM, device authorization, credential-vault rotation, arbitrary plugin execution, multimodal adapter, distributed cache, semantic routing, or LLM-as-judge evaluation is claimed. The relay renews gateway access tokens; its bootstrap agent credential still requires secure provisioning and eventual renewal.
 
-The first migration initializes schema; future releases need versioned migrations. HA app replicas do not create an HA database. External TLS, database HA/backups, secret management, egress controls, retention jobs, load/chaos tests, and an independent security review remain operator requirements. Dependency versions are recorded in `uv.lock`; container runtime packages use hashed `requirements.lock`.
+Schema changes use serialized versioned migrations. Databases created by the initial release require an explicit, validated `--adopt-v1` step after backup; see the migration guide. HA app replicas do not create an HA database. External TLS, database HA/backups, secret management, egress controls, billing/audit archival, load/chaos tests, and an independent security review remain operator requirements. Dependency versions are recorded in `uv.lock`; container runtime packages use hashed `requirements.lock`.
 
 ## License
 

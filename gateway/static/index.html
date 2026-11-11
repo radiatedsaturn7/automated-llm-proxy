@@ -4,16 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>LLM Gateway · Administration</title>
+  <title>Thunderbolt · Administration</title>
   <link rel="stylesheet" href="/admin/static/style.css">
   <script src="/admin/static/app.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#content">Skip to content</a>
-  <header><div><span class="brand">LLM Gateway</span><span class="tag">Administration</span></div><div id="identity">Not signed in</div></header>
+  <header><div><span class="brand">Thunderbolt</span><span class="tag">Administration</span></div><div id="identity">Not signed in</div></header>
   <main>
     <section id="login" class="card narrow" aria-labelledby="login-title">
-      <p class="eyebrow">Operator access</p><h1 id="login-title">Manage your gateway</h1>
+      <img class="brand-art" src="/admin/static/thunderbolt-banner.png" width="1752" height="897" alt="Thunderbolt: A-10 aircraft with shark-mouth nose art. Brrrrt it into production.">
+      <p class="eyebrow">Brrrrt it into production</p><h1 id="login-title">Manage your gateway</h1>
       <p>Sign in with your identity provider, or use an administrator credential. Credentials entered here are kept in memory only.</p>
       <a class="button" href="/auth/oidc/start">Sign in with SSO</a>
       <form id="login-form"><label for="admin-token">Administrator API key</label><input id="admin-token" type="password" autocomplete="off" spellcheck="false" required><button type="submit">Connect</button></form>
@@ -29,6 +30,7 @@
         <button type="button" data-view="keys">API keys</button>
         <button type="button" data-view="audit">Audit</button>
         <button type="button" data-view="evaluation">Evaluation</button>
+        <button type="button" id="revoke-all-sessions" class="danger">Revoke all browser sessions</button>
         <button type="button" id="disconnect">Sign out</button>
       </nav>
       <section id="content" tabindex="-1">

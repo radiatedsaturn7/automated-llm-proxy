@@ -2,23 +2,29 @@
 
 This is a working foundation under active development, **not** a fully enterprise-ready product. Source availability does not eliminate model-provider, database or hosting charges. “Included” describes implementation scope, not independent assurance, an SLA or a performance benchmark. Run the repository tests and review the API before adoption.
 
-| Capability | Initial scope | Important boundary / next work |
+| Capability | Implemented scope | Important boundary / next work |
 |---|---|---|
 | Stateless replicas | External PostgreSQL-backed identity, policy, sessions and accounting | Local SQLite is development-only; external state is essential |
 | Users and teams | Administrator/member roles; user and team budgets | One team per user; no delegated team-admin or arbitrary RBAC |
-| Virtual credentials | Expiry, revocation, rotation, model scopes, request/token allowances | Rotation immediately revokes old key; no grace window |
+| Virtual credentials | Explicit inference/admin/account/provisioning permissions, expiry, revocation, rotation, model scopes and rate allowances | Permissions cannot elevate user role; rotation preserves authorization and expiry |
 | Provider abstraction | OpenAI-compatible, Azure OpenAI v1 and Anthropic text adapters | Not full vendor API parity; validate supported request types |
 | Spending control | Shared reservations and UTC monthly accounting | Prices operator-maintained; crash reconciliation required; not invoice reconciliation |
 | SSO | OIDC with explicit group mapping and browser sessions | SCIM Users/Groups provisioning subset and explicit offboarding; no SAML, local passwords or IdP certification |
 | Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Member portal manages own existing credentials; no arbitrary delegated team-admin roles |
-| Local relay | Authenticated loopback forwarding and short-lived access-token renewal | Does not rotate provider keys or its long-lived agent credential automatically |
-| Evaluation | Bounded deterministic checks of supplied outputs | Immutable prompt registry and saved offline evaluation reports; no automatic model calls or LLM judges |
+| Local relay | Authenticated loopback forwarding and short-lived access-token renewal; opt-in durable agent-secret rollover | Requires protected client journal for rollover; original expiry remains; no provider-key rotation or device flow |
+| Evaluation | Immutable plaintext prompt registry, saved deterministic reports, paired baseline/candidate regression gates | Explicitly saved templates are stored; no paid automatic calls, LLM judges, safety certification or deployment gate enforcement |
 | Deployment | Container and deployment examples for simple and replicated setups | Infrastructure must be supplied/validated; examples are not certification |
-| Audit | Administrative and usage metadata in database | No immutable audit storage, retention scheduler or SIEM delivery guarantee |
+| Audit | Metadata records and actor-bound signed export cursors; bounded browser JSON downloads | No immutable storage or automatic SIEM delivery; exports are fixed windows, not database snapshots |
 | Monitoring | Health/readiness and metrics integration in application/deployment | Correlation IDs, bounded route metrics, structured metadata logs, example dashboards/alerts; SLO ownership remains operator work |
-| Advanced reliability | Bounded requests and explicit failure handling | No claim of automatic cross-provider semantic equivalence or exactly-once inference |
+| Advanced reliability | DB-shared per-model circuits, next-request routing, leased half-open probes and stale-completion fencing | No same-request replay, automatic model equivalence, exactly-once inference or failover SLA |
 | Extensibility | Explicit source-level provider adapters | No untrusted plugin loader or isolation sandbox |
 | Governance | Model scopes and privileged provider configuration | No DLP, moderation suite, compliance attestation or data residency enforcement |
+
+## Verification status
+
+The fifth increment merged as `3d9a14a`. CI runs `43064080373` and `43064057313` on its head `9f3bdc4` passed Python/lint/dependency audit, PostgreSQL tests, deployment validation and the container browser suite. Browser logs confirm the real admin/prompt flow with a TLS mock provider and two mocked-session portal security cases. No paid provider inference was needed for those tests. They are correctness checks, not vendor interoperability certification or production capacity benchmarks.
+
+The sixth increment implements shared circuit breakers (schema revision 5), journaled agent-secret rollover (revision 6), bounded export UI and paired offline evaluation comparisons. At the local acceptance checkpoint, **178 tests passed and five PostgreSQL-specific tests were skipped**; Ruff and Helm validation also passed. This is not a claim that the sixth-increment PostgreSQL or browser tests have run. Branch CI must pass before merge; inspect the relevant commit's checks for current evidence. The export browser tests exercise pagination, limits, authentication failure, cancellation and stale-generation handling. The PostgreSQL circuit tests include concurrent half-open probe election; their presence in source alone is not execution evidence.
 
 ## Research informing priorities
 
@@ -33,14 +39,14 @@ Reviewed official sources on 2026-11-11. These are capability references, not cl
 ## Recommended next milestones
 
 1. **Assurance before breadth:** PostgreSQL concurrency/load tests, provider contract tests, OIDC interoperability, security assessment, restore drills, schema upgrade/rollback procedures and operational alerting.
-2. **Identity lifecycle:** SCIM or explicit provisioning automation, delegated administration, multiple memberships, service accounts, group-change reconciliation, session administration and IdP logout integration.
-3. **Resilience and scale:** measured pool/lock capacity, provider circuit breakers and health-aware routing, explicit retry/idempotency policy, bounded streaming accounting and regional recovery tests.
+2. **Identity lifecycle:** Expand the tested SCIM subset and real IdP compatibility; add delegated administration, multiple memberships, group-change reconciliation and IdP logout integration. Explicit session revocation already exists.
+3. **Resilience and scale:** Measure pool/lock capacity, exercise circuit breakers under load/chaos, define end-to-end idempotency policy and test regional recovery. Health-aware next-request selection is not safe replay of an ambiguous request.
 4. **Governance:** configurable retention and immutable audit export, data residency, secrets-manager integration, approved guardrail hooks, DLP/redaction and secure plugin boundaries.
-5. **Developer workflows:** prompt versioning, datasets, reproducible evaluation runs, model-quality comparison, approval gates, cost/latency regressions and an SDK compatibility matrix.
+5. **Developer workflows:** Build curated datasets, approval workflows, cost/latency comparisons and an SDK compatibility matrix on the existing prompt versions and offline reports. Paired deterministic gates do not measure general model quality.
 6. **Optional optimization:** tenant-isolated caching with privacy policy, batching, weighted routing and multimodal/vendor-specific endpoints. Cache semantics and data isolation must precede cache hit-rate claims.
 
 See [architecture](architecture.md), [security](security.md), [evaluation](evaluation.md) and [relay](local-relay.md) for operational details and exclusions.
 
 ### Identity administration increment
 
-Explicit administrator-verified OIDC identity linking and per-user/all-browser-session revocation are implemented and audited. Identity linking never guesses from matching email and does not replace existing links. These controls are not SCIM, IdP-session revocation or automatic group-change reconciliation. Provider model-map updates now use the same size and alias validation as provider creation.
+Explicit administrator-verified OIDC identity linking and per-user/all-browser-session revocation are implemented and audited. Identity linking never guesses from matching email and does not replace existing links. Identity linking/session revocation are distinct from the separate SCIM subset, IdP-session revocation and automatic group-change reconciliation. Provider model-map updates now use the same size and alias validation as provider creation.

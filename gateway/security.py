@@ -34,6 +34,7 @@ class Identity:
     user: db.User
     key: db.APIKey | None = None
     session: db.BrowserSession | None = None
+    generation: int | None = None
 
 
 async def identify(request: Request, allow_session=False):
@@ -42,6 +43,7 @@ async def identify(request: Request, allow_session=False):
         db.init_engine()
     async with db.session_factory() as session:
         key = None
+        generation = None
         browser_session = None
         if auth.startswith("Bearer "):
             token = auth[7:]
@@ -54,7 +56,9 @@ async def identify(request: Request, allow_session=False):
                     claims = jwt.decode(token, get_settings().gateway_signing_key, algorithms=["HS256"],
                                         audience="llm-gateway", issuer="llm-gateway", options={"require": ["exp", "iat", "sub", "kid"]})
                     key = await session.get(db.APIKey, claims["kid"])
-                    if key is None or key.kind != "agent" or key.user_id != claims["sub"]:
+                    generation = claims.get("gen", 0)
+                    if (key is None or key.kind != "agent" or key.user_id != claims["sub"]
+                            or type(generation) is not int or generation != key.generation):
                         key = None
                 except jwt.PyJWTError:
                     pass
@@ -83,7 +87,7 @@ async def identify(request: Request, allow_session=False):
             team = await session.get(db.Team, team_id)
             if team is None or not team.enabled:
                 raise HTTPException(403, "Team disabled")
-        return Identity(user, key, browser_session)
+        return Identity(user, key, browser_session, generation)
 
 
 def require_permission(identity, permission):

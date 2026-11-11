@@ -39,6 +39,8 @@ class RelaySettings:
     allow_remote_bind: bool = False
     max_body_bytes: int = 4 * 1024 * 1024
     request_timeout_seconds: float = 120.0
+    journal_directory: str | None = None
+    rotation_interval_seconds: int = 86400
 
     def __post_init__(self) -> None:
         parsed = urlsplit(self.central_url)
@@ -54,10 +56,14 @@ class RelaySettings:
             raise ValueError("CENTRAL_GATEWAY_URL must be HTTPS (HTTP only for loopback), without credentials/query/fragment")
         if not _loopback(self.bind) and not self.allow_remote_bind:
             raise ValueError("Non-loopback binding requires RELAY_ALLOW_REMOTE_BIND=true")
-        if len(self.credential) < 32 or len(self.local_token) < 32:
+        if (len(self.credential) < 32 and not self.journal_directory) or len(self.local_token) < 32:
             raise ValueError("RELAY_CREDENTIAL and RELAY_LOCAL_TOKEN must each contain at least 32 characters")
         if self.credential == self.local_token:
             raise ValueError("Local token must be distinct from the central credential")
+        if self.journal_directory and os.name != "posix":
+            raise ValueError("Durable relay rotation currently requires a POSIX filesystem")
+        if not 600 <= self.rotation_interval_seconds <= 2592000:
+            raise ValueError("Rotation interval must be between 600 and 2592000 seconds")
         if not 1 <= self.port <= 65535:
             raise ValueError("RELAY_PORT is invalid")
         if not 1 <= self.max_body_bytes <= 32 * 1024 * 1024:
@@ -73,6 +79,8 @@ class RelaySettings:
             local_token=os.environ.get("RELAY_LOCAL_TOKEN", ""),
             bind=os.environ.get("RELAY_BIND", "127.0.0.1"),
             port=int(os.environ.get("RELAY_PORT", "8090")),
+            journal_directory=os.environ.get("RELAY_JOURNAL_DIRECTORY"),
+            rotation_interval_seconds=int(os.environ.get("RELAY_ROTATION_INTERVAL_SECONDS", "86400")),
             allow_remote_bind=os.environ.get("RELAY_ALLOW_REMOTE_BIND", "false").lower() == "true",
         )
 
@@ -86,6 +94,7 @@ class TokenBroker:
         self._token: str | None = None
         self._refresh_at = 0.0
         self._lock = asyncio.Lock()
+        self._journal = None
 
     async def token(self, rejected_token: str | None = None) -> str:
         async with self._lock:
@@ -97,9 +106,21 @@ class TokenBroker:
                 return self._token
             self._token = None  # Never fall back to stale tokens after an exchange failure.
             try:
+                credential = self.settings.credential
+                if self.settings.journal_directory:
+                    from .relay_journal import CredentialJournal, RotationError
+                    try:
+                        if self._journal is None:
+                            self._journal = CredentialJournal(self.settings.journal_directory,
+                                                              self.settings.central_url, credential)
+                        credential = await self._journal.credential(self.client, self.settings.rotation_interval_seconds)
+                    except (RotationError, OSError, ValueError, KeyError, TypeError):
+                        raise HTTPException(503, "Durable agent rotation unavailable; inspect private journal") from None
+                if credential == self.settings.local_token:
+                    raise HTTPException(503, "Local token must differ from durable root credential")
                 response = await self.client.post(
                     self.settings.central_url.rstrip("/") + "/auth/agent/exchange",
-                    headers={"Authorization": "Bearer " + self.settings.credential},
+                    headers={"Authorization": "Bearer " + credential},
                     follow_redirects=False,
                 )
                 if response.status_code != 200:
@@ -140,6 +161,8 @@ def create_relay_app(settings: RelaySettings | None = None, client: httpx.AsyncC
         try:
             yield
         finally:
+            if broker._journal is not None:
+                broker._journal.close()
             if owned:
                 await client.aclose()
 

@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     max_request_bytes: int = Field(default=1_048_576, ge=1024, le=10_485_760)
     max_output_tokens: int = Field(default=4096, ge=1, le=32768)
     allow_private_provider_hosts: bool = False
+    circuit_breaker_enabled: bool = True
+    circuit_failure_threshold: int = Field(default=3, ge=1, le=100)
+    circuit_cooldown_seconds: int = Field(default=30, ge=1, le=3600)
+    circuit_probe_seconds: int = Field(default=150, ge=5, le=1800)
 
     @model_validator(mode="after")
     def validate_secrets(self):
@@ -55,6 +59,11 @@ class Settings(BaseSettings):
             if len(self.metrics_token) < 32:
                 raise ValueError("Production METRICS_TOKEN requires at least 32 characters")
         return self
+
+    @property
+    def effective_circuit_probe_seconds(self):
+        # Provider timeout is per read, not an overall streaming deadline.
+        return max(self.circuit_probe_seconds, self.provider_timeout_seconds + 30)
 
     @property
     def groups(self):

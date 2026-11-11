@@ -28,6 +28,8 @@ async def reserve(identity, amount, tokens, model):
         team, user, key = await db.lock_policy_subjects(s, key.team_id, key.user_id, key.id)
         if not key or key.revoked or aware(key.expires_at) <= db.now() or not user or not user.enabled:
             raise HTTPException(401, "Credential changed")
+        if key.kind == "agent" and identity.generation != key.generation:
+            raise HTTPException(401, "Agent credential generation changed")
         if key.user_id != identity.user.id or key.team_id != user.team_id:
             raise HTTPException(403, "Credential team changed")
         if key.allowed_models and model not in key.allowed_models:

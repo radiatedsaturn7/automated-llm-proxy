@@ -80,3 +80,12 @@ default. Its explicit legacy backfill preserves existing authority by owner role
 and credential kind; key secrets, revocation, expiry, budgets and model policies are
 unchanged. See [credential-permissions.md](credential-permissions.md) before rollout
 and review broad legacy administrator credentials after upgrading.
+
+## Revision 6: durable agent root rotation
+
+Revision 6 adds an integer generation counter (existing credentials start at zero),
+last committed operation ID, and one pending rotation row per logical agent key.
+Only credential digests are stored server-side. Prior access JWTs without a generation
+claim are treated as generation zero until expiry or the first root rotation fences
+them. Existing keys retain IDs, secrets, permissions and expiry. The opt-in relay
+journal requires local durable secret storage; see [local-relay.md](local-relay.md).

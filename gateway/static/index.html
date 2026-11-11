@@ -29,6 +29,7 @@
         <button type="button" data-view="providers">Providers</button>
         <button type="button" data-view="keys">API keys</button>
         <button type="button" data-view="audit">Audit</button>
+        <button type="button" data-view="exports">Export audit / usage</button>
         <button type="button" data-view="prompts">Prompt registry</button>
         <button type="button" data-view="evaluation">Evaluation</button>
         <button type="button" id="revoke-all-sessions" class="danger">Revoke all browser sessions</button>
@@ -40,6 +41,16 @@
         <section id="summary" class="card" hidden></section>
         <div id="table-wrap" class="card table-wrap"></div>
         <section id="editor" class="card" hidden><h2 id="editor-title">Create</h2><form id="resource-form"></form></section>
+        <section id="exports" class="card" hidden>
+          <h2>Download audit or usage metadata</h2><p>Downloads a JSON file to your device, not to an external service. Records include user identifiers and usage information: protect the downloaded file. This does not export prompt content or credentials.</p>
+          <form id="export-form"><label for="export-kind">Export records</label><select id="export-kind"><option value="audit">Audit</option><option value="usage">Usage</option></select>
+            <label for="export-since">Start time (UTC, inclusive)</label><input id="export-since" type="datetime-local" required>
+            <label for="export-until">End time (UTC, exclusive)</label><input id="export-until" type="datetime-local" required>
+            <p>Choose a past window of at most 31 days. Browser exports are limited to 5,000 records and 4 MiB of record data. If a limit is reached, no partial file is downloaded: narrow the window or use the paginated API.</p>
+            <button id="export-start" type="submit">Download JSON</button><button id="export-cancel" type="button" disabled>Cancel export</button>
+          </form><p id="export-progress" role="status" aria-live="polite"></p>
+          <p>Fixed-window pagination is not a database snapshot. For continuous ingestion, overlap windows and deduplicate record IDs. Navigating away or signing out cancels this download.</p>
+        </section>
         <section id="prompts" hidden>
           <div class="card"><h2>Explicitly stored prompt templates</h2><p>Templates are stored in plaintext in the database. Do not enter secrets. This does not log inference prompts or call a model. Saved evaluation reports contain deterministic results, not case text.</p>
             <form id="prompt-create-form"><label for="prompt-name">Template name</label><input id="prompt-name" required maxlength="120"><label for="prompt-content">Initial template content</label><textarea id="prompt-content" required maxlength="32768" rows="5" placeholder="Hello {{name}}"></textarea><button type="submit">Save new template</button></form>

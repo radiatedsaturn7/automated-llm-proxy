@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from prometheus_client import Counter, Histogram
 from sqlalchemy import select
 
-from . import db, policy
+from . import db, policy, provider_health
 from .config import get_settings
 from .providers import StreamTranslator, response_headers, translate_response, upstream_request
 from .security import inference_identity
@@ -101,7 +101,7 @@ async def models(request: Request):
     return {"object": "list", "data": [{"id": a, "object": "model", "owned_by": "gateway"} for a in aliases]}
 
 
-async def finish_request(request, response, reservation_id, model, provider, route, usage=None, release=False):
+async def finish_request(request, response, reservation_id, model, provider, route, usage=None, release=False, health_ticket=None, outcome=None, retry_after=None):
     # Schedule accounting before the first await: ASGI disconnect cancellation must
     # not strand it behind an interrupted upstream aclose(). Crash recovery still
     # retains a conservative pending reservation if the process dies entirely.
@@ -109,6 +109,11 @@ async def finish_request(request, response, reservation_id, model, provider, rou
         try:
             await policy.finalize(reservation_id, model, provider.id, route, usage, release=release)
         finally:
+            if outcome is not None:
+                try:
+                    await provider_health.record(health_ticket, outcome, retry_after)
+                except Exception:
+                    log.error("Provider health update failed")
             if response is not None:
                 try:
                     await asyncio.wait_for(response.aclose(), timeout=5)
@@ -140,19 +145,18 @@ async def infer(request, endpoint):
     model = payload["model"]
     if identity.key.allowed_models and model not in identity.key.allowed_models:
         raise HTTPException(403, "Model not allowed")
-    async with db.session_factory() as s:
-        providers = (await s.scalars(select(db.Provider).where(db.Provider.enabled.is_(True)).order_by(
-            db.Provider.priority, db.Provider.id))).all()
-    # Explicit deterministic routing. No automatic inference retries: avoids duplicate billing.
-    provider = next((p for p in providers if model in p.models and (endpoint != "embeddings" or p.kind in {"openai", "azure_openai"})), None)
-    if not provider:
-        raise HTTPException(404, "Configured model not available")
+    # Choose one healthy route before reservation/dispatch. Never retry this request.
+    provider, health_ticket = await provider_health.choose(model, endpoint)
     route = provider.models[model]
-    url, headers, body = upstream_request(provider, route, payload, endpoint)
-    input_bound = policy.token_bound(payload)
-    output_bound = payload.get("max_tokens", payload.get("max_completion_tokens", 0))
-    amount = policy.price(input_bound * 2, output_bound * 2, route)
-    reservation_id = await policy.reserve(identity, amount, input_bound + output_bound, model)
+    try:
+        url, headers, body = upstream_request(provider, route, payload, endpoint)
+        input_bound = policy.token_bound(payload)
+        output_bound = payload.get("max_tokens", payload.get("max_completion_tokens", 0))
+        amount = policy.price(input_bound * 2, output_bound * 2, route)
+        reservation_id = await policy.reserve(identity, amount, input_bound + output_bound, model)
+    except BaseException:
+        await provider_health.abandon(health_ticket)
+        raise
     client = request.app.state.upstream
     response = None
     try:
@@ -161,7 +165,9 @@ async def infer(request, endpoint):
         if response.status_code >= 300:
             # Provider may have processed 5xx responses; keep conservative charge. Definitive 4xx release.
             await finish_request(request, response, reservation_id, model, provider, route,
-                                 release=400 <= response.status_code < 500)
+                                 release=400 <= response.status_code < 500, health_ticket=health_ticket,
+                                 outcome=provider_health.classify(response.status_code),
+                                 retry_after=response.headers.get("retry-after"))
             REQUESTS.labels(endpoint, "upstream_error").inc()
             raise HTTPException(429 if response.status_code == 429 else 502, "Provider rejected request",
                                 headers=response_headers(response, reservation_id))
@@ -170,17 +176,20 @@ async def infer(request, endpoint):
 
             async def stream():
                 completed = False
+                health_outcome = None
                 try:
                     async for chunk in translator.iterate(response):
                         yield chunk
                     completed = translator.complete
-                    REQUESTS.labels(endpoint, "success").inc()
+                    health_outcome = 'success' if completed else 'failure'
+                    REQUESTS.labels(endpoint, "success" if completed else "stream_error").inc()
                 except (httpx.HTTPError, ValueError, TypeError, KeyError, AttributeError):
+                    health_outcome = 'failure'
                     REQUESTS.labels(endpoint, "stream_error").inc()
                     yield b'data: {"error":{"message":"Upstream stream interrupted","type":"upstream_error"}}\n\n'
                 finally:
                     await finish_request(request, response, reservation_id, model, provider, route,
-                                         translator.usage if completed else None)
+                                         translator.usage if completed else None, health_ticket=health_ticket, outcome=health_outcome)
 
             return StreamingResponse(stream(), media_type="text/event-stream", headers={
                 **response_headers(response, reservation_id), "X-Accel-Buffering": "no"})
@@ -196,7 +205,8 @@ async def infer(request, endpoint):
         if not isinstance(data, dict):
             raise ValueError("Provider response not an object")
         data = translate_response(provider, data, model)
-        await finish_request(request, response, reservation_id, model, provider, route, data.get("usage"))
+        await finish_request(request, response, reservation_id, model, provider, route, data.get("usage"),
+                             health_ticket=health_ticket, outcome='success')
         REQUESTS.labels(endpoint, "success").inc()
         return JSONResponse(data, headers=response_headers(response, reservation_id))
     except HTTPException:
@@ -205,7 +215,8 @@ async def infer(request, endpoint):
         await finish_request(request, response, reservation_id, model, provider, route)
         raise
     except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
-        await finish_request(request, response, reservation_id, model, provider, route)
+        await finish_request(request, response, reservation_id, model, provider, route,
+                             health_ticket=health_ticket, outcome='failure')
         REQUESTS.labels(endpoint, "error").inc()
         raise HTTPException(502, "Provider unavailable or invalid response", headers=response_headers(response, reservation_id) if response is not None else {"X-Reservation-ID": reservation_id}) from None
 

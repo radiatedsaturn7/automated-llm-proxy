@@ -144,6 +144,8 @@ async def patch_provider(provider_id: str, body: schemas.ProviderPatch, identity
             provider.models = body.model_dump(mode="json")["models"]
         if body.priority is not None:
             provider.priority = body.priority
+        from .provider_health import reset
+        await reset(s, provider.id)
         await db.audit(s, identity.user.id, "provider.update", provider.id)
         return record(provider)
 
@@ -267,3 +269,24 @@ async def revoke_all_sessions(body: schemas.SessionRevocation, identity: Identit
         count = result.rowcount
         await db.audit(s, identity.user.id, "sessions.revoke_all", count=count)
     return {"revoked_sessions": count}
+
+
+@router.get("/admin/api/providers/{provider_id}/health")
+async def get_provider_health(provider_id: str, identity: Identity = Depends(admin)):
+    async with db.session_factory() as session:
+        if await session.get(db.Provider, provider_id) is None:
+            raise HTTPException(404, "Provider not found")
+        rows = (await session.scalars(select(db.ProviderHealth).where(
+            db.ProviderHealth.provider_id == provider_id).order_by(db.ProviderHealth.model_alias))).all()
+        return {"enabled": get_settings().circuit_breaker_enabled, "routes": [record(row) for row in rows]}
+
+
+@router.post("/admin/api/providers/{provider_id}/health/reset")
+async def reset_provider_health(provider_id: str, identity: Identity = Depends(admin)):
+    from .provider_health import reset
+    async with db.transaction() as session:
+        if await session.get(db.Provider, provider_id) is None:
+            raise HTTPException(404, "Provider not found")
+        await reset(session, provider_id)
+        await db.audit(session, identity.user.id, "provider.health.reset", provider_id)
+    return {"reset": True}

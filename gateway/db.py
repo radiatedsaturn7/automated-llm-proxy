@@ -61,8 +61,24 @@ class Provider(Base):
     priority: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ProviderHealth(Base):
+    __tablename__ = "provider_health"
+    provider_id: Mapped[str] = mapped_column(ForeignKey("providers.id"), primary_key=True)
+    model_alias: Mapped[str] = mapped_column(String(128), primary_key=True)
+    state: Mapped[str] = mapped_column(String(16), default="closed")
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    epoch: Mapped[int] = mapped_column(Integer, default=0)
+    open_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    probe_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    probe_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class APIKey(Base):
     __tablename__ = "api_keys"
+    generation: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    last_rotation_operation: Mapped[str | None] = mapped_column(String(36), nullable=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     name: Mapped[str] = mapped_column(String(120))
     prefix: Mapped[str] = mapped_column(String(16))
@@ -77,6 +93,15 @@ class APIKey(Base):
     rpm: Mapped[int] = mapped_column(Integer, default=60)
     tpm: Mapped[int] = mapped_column(Integer, default=100000)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AgentRotation(Base):
+    __tablename__ = "agent_rotations"
+    key_id: Mapped[str] = mapped_column(ForeignKey("api_keys.id"), primary_key=True)
+    operation_id: Mapped[str] = mapped_column(String(36))
+    pending_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    generation: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Reservation(Base):

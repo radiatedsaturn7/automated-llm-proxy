@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, or_, select
 
 from . import db, schemas
 from .config import get_settings
-from .security import Identity, aware, digest, identify
+from .security import Identity, aware, digest, identify, revalidate_identity
 
 router = APIRouter(prefix="/auth/agent/enrollment", tags=["agent-enrollment"])
 
@@ -57,11 +57,10 @@ async def browser(request: Request):
 
 
 async def current_user(s, identity):
-    user = await s.get(db.User, identity.user.id)
-    session = await s.get(db.BrowserSession, identity.session.digest)
-    if not user or not user.enabled or not user.oidc_subject or not session or aware(session.expires_at) <= db.now():
+    current = await revalidate_identity(s, identity)
+    if not current.session or not current.user.oidc_subject:
         raise HTTPException(401, "SSO session unavailable")
-    return user
+    return current.user
 
 
 def bearer(request):

@@ -10,7 +10,28 @@ Configure `kind: azure_openai`, base URL `https://RESOURCE.openai.azure.com/open
 
 ## Anthropic
 
-Configure `kind: anthropic`, base URL `https://api.anthropic.com/v1`, server key and exact model ID. Native text messages are translated to OpenAI-style responses and streaming chunks. System text is extracted. Unsupported tool/structured-output/reasoning options are rejected rather than silently ignored. This is not full Anthropic API parity.
+Configure `kind: anthropic`, base URL `https://api.anthropic.com/v1`, server key and exact model ID. Native text and function-tool messages are translated to OpenAI-style responses and
+streaming chunks. System/developer text must precede conversation turns. Function
+schemas must describe JSON objects; tool names/IDs and JSON arguments are validated.
+`tool_choice` supports auto, required, none and an explicit named function;
+`parallel_tool_calls` maps to native parallel-tool control where applicable.
+
+Assistant tool history must be followed by all matching results before the next turn.
+Duplicate/dangling IDs, malformed/non-finite JSON, unknown fields and unsupported
+strict-schema controls fail explicitly. Multiple adjacent results are grouped into
+the native user tool-result turn. Tool calls are returned to the client, never executed
+by the gateway. Streaming validates block indices, JSON argument completion and native
+terminal events; interrupted or malformed streams retain conservative accounting.
+
+Structured output, thinking/reasoning blocks, native server tools, image/audio content
+and unknown native block/finish types are not supported. Model-specific limitations
+still apply; a model may reject forced tool choices even if the adapter supports their
+syntax. This is not full Anthropic API parity or live-model certification.
+
+Contract references checked 2026-11-11: [define tools](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools),
+[handle tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls),
+[parallel tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use),
+and [streaming](https://platform.claude.com/docs/en/build-with-claude/streaming).
 
 ## Failure semantics
 
@@ -51,3 +72,13 @@ Contract references: [Google content generation API](https://ai.google.dev/api/g
 and [Google embedding API](https://ai.google.dev/api/embeddings). Tests exercise
 simulated native contracts and failure paths without credentials or paid API calls;
 validate your chosen live model/version before production adoption.
+
+
+## Strict response parsing
+
+Provider JSON with duplicate object keys, non-finite numeric values or excessive
+nesting is rejected rather than interpreted ambiguously. This includes tool arguments.
+A malformed response does not establish that the provider did no work: the gateway
+retains conservative billing and returns a generic failure without the raw body.
+Optional generated-output guards apply after supported normalization; see
+[guardrails](guardrails.md) for streaming exclusions and billing semantics.

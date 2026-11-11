@@ -6,7 +6,7 @@ from sqlalchemy import select, update
 
 from . import db, schemas
 from .admin import record
-from .security import Identity, aware, identify, new_key
+from .security import Identity, aware, identify, new_key, revalidate_identity
 
 router = APIRouter(prefix="/teams/api")
 
@@ -16,22 +16,12 @@ async def caller(request: Request):
 
 
 async def authorize_actor(s, identity):
-    user = await s.get(db.User, identity.user.id)
-    if not user or not user.enabled:
-        raise HTTPException(401, "User unavailable")
-    permissions = None
-    if identity.key:
-        key = await s.get(db.APIKey, identity.key.id)
-        if (not key or key.revoked or aware(key.expires_at) <= db.now() or key.kind != "api"
-                or not await db.active_membership(s, user, key.team_id)):
-            raise HTTPException(401, "Credential changed")
-        permissions = key.permissions
-        identity.key = key
-    else:
-        browser = await s.get(db.BrowserSession, identity.session.digest)
-        if not browser or aware(browser.expires_at) <= db.now():
-            raise HTTPException(401, "Session changed")
-    identity.user = user
+    current = await revalidate_identity(s, identity)
+    user = current.user
+    if current.key and current.key.kind != "api":
+        raise HTTPException(401, "Credential changed")
+    permissions = current.key.permissions if current.key else None
+    identity.user, identity.key, identity.session = current.user, current.key, current.session
     global_admin = user.role == "admin" and (permissions is None or "admin" in permissions)
     return global_admin
 

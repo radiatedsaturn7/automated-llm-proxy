@@ -20,7 +20,7 @@ Serve the gateway only over HTTPS in production. Cookies must remain Secure, Htt
 
 Provider URLs are privileged configuration, not user-supplied forward-proxy destinations. Do not enable private provider hosts unless required for a controlled internal model service. Enforce egress policy independently: application URL validation is not a replacement for DNS, routing and firewall protections against SSRF or compromised providers. Use dedicated provider credentials with minimal permissions and spending caps.
 
-A model response and tool-call arguments are untrusted data. This gateway does not execute tool calls and does not guarantee prompt-injection prevention, factual correctness or absence of sensitive data. Deterministic evaluation is not a safety filter. Opt-in inbound block/redact guardrails provide bounded, reviewed heuristic detectors, not comprehensive DLP. They do not inspect provider outputs or reliably detect encoded or obfuscated secrets. See [guardrails](guardrails.md). If you need broader PII/DLP coverage, moderation or output approval, integrate and validate those separately before allowing sensitive workloads.
+A model response and tool-call arguments are untrusted data. This gateway does not execute tool calls and does not guarantee prompt-injection prevention, factual correctness or absence of sensitive data. Deterministic evaluation is not a safety filter. Opt-in inbound block/redact guardrails provide bounded, reviewed heuristic detectors, not comprehensive DLP. A separate opt-in non-streaming output policy can inspect normalized text/refusals/tool arguments; neither policy reliably detects encoded or obfuscated secrets. Streaming is rejected before dispatch when output policy is enabled. See [guardrails](guardrails.md). If you need broader PII/DLP coverage, moderation or output approval, integrate and validate those separately before allowing sensitive workloads.
 
 Default audit/usage records should contain metadata, not prompt or response bodies. Reverse proxies, tracing agents and providers have independent logging policies; inspect them before sending confidential material. Audit rows are not tamper-evident or WORM-protected. Define retention, export and erasure procedures rather than allowing unbounded growth.
 
@@ -97,3 +97,17 @@ a new sign-in. Failure to retrieve trusted signing metadata fails closed.
 Revision 11 invalidates all pre-upgrade browser sessions once, because they do not
 contain trustworthy IdP session correlation. Schedule the upgrade and notify users
 to sign in again. API credentials are not changed by that migration.
+
+## Control-plane revocation ordering
+
+Privileged mutation endpoints revalidate the original caller's current user, credential,
+permission and session state inside the shared policy-writer transaction. A dependency's
+earlier authentication result is not sufficient after asynchronous work or lock waits.
+Rotated API-key digests/generations are fenced as well as revoked/expired keys; a queued
+request holding an old key cannot mint a replacement after rotation/revocation wins
+the database ordering. Delegated and self-service actions retain their narrower scopes.
+
+This is transaction ordering, not retroactive cancellation: a mutation committed before
+revocation remains committed. Inference already admitted/dispatched may still complete
+and be billed. Audit records remain metadata-only. Use separate key/session revocation
+and local disablement as appropriate for incident containment.

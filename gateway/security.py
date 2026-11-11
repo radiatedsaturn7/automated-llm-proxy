@@ -90,6 +90,56 @@ async def identify(request: Request, allow_session=False):
         return Identity(user, key, browser_session, generation)
 
 
+async def revalidate_identity(session, identity):
+    """Fence a dependency snapshot inside the caller's policy-writer transaction.
+
+    Data-plane agent JWTs are never accepted by this control-plane helper.
+    Never open a nested transaction here. Mutation callers hold the writer gate,
+    so revocation and this recheck have one authoritative database ordering.
+    """
+    user = await session.get(db.User, identity.user.id)
+    if not user or not user.enabled:
+        raise HTTPException(401, "Authorization changed")
+    key, browser = None, None
+    if identity.key:
+        key = await session.get(db.APIKey, identity.key.id)
+        if (not key or key.user_id != user.id or key.kind != "api" or key.kind != identity.key.kind
+                or key.digest != identity.key.digest or key.generation != identity.key.generation
+                or key.revoked or aware(key.expires_at) <= db.now()
+                or not await db.active_membership(session, user, key.team_id)):
+            raise HTTPException(401, "Authorization changed")
+        if identity.generation is not None and identity.generation != key.generation:
+            raise HTTPException(401, "Authorization changed")
+    elif identity.session:
+        browser = await session.get(db.BrowserSession, identity.session.digest)
+        if (not browser or browser.user_id != user.id or aware(browser.expires_at) <= db.now()
+                or browser.csrf != identity.session.csrf):
+            raise HTTPException(401, "Authorization changed")
+    else:
+        raise HTTPException(401, "Authorization required")
+    return Identity(user, key, browser, identity.generation)
+
+
+async def revalidate_admin(session, identity):
+    try:
+        current = await revalidate_identity(session, identity)
+    except HTTPException as exc:
+        raise HTTPException(403, "Administrator authorization changed") from exc
+    if current.user.role != "admin" or (current.key and current.key.kind != "api"):
+        raise HTTPException(403, "Administrator authorization changed")
+    require_permission(current, "admin")
+    return current
+
+
+async def revalidate_provisioning(session, identity):
+    current = await revalidate_identity(session, identity)
+    if current.user.role != "admin" or (current.key and (
+            current.key.kind != "api" or not isinstance(current.key.permissions, list)
+            or not {"admin", "provisioning"}.intersection(current.key.permissions))):
+        raise HTTPException(403, "Provisioning authorization changed")
+    return current
+
+
 def require_permission(identity, permission):
     if identity.key:
         effective = ["inference"] if identity.key.kind == "agent" else identity.key.permissions

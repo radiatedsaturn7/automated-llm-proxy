@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from . import db
 from .admin import record
-from .security import Identity, aware, identify, new_key, require_permission
+from .security import Identity, aware, identify, new_key, require_permission, revalidate_identity
 
 router = APIRouter(prefix="/account/api")
 
@@ -59,22 +59,14 @@ async def keys(identity: Identity = Depends(member)):
 
 
 async def owned(session, identity, key_id):
-    user = await session.get(db.User, identity.user.id)
-    if not user or not user.enabled:
-        raise HTTPException(401, "User unavailable")
+    current = await revalidate_identity(session, identity)
+    require_permission(current, "account")
+    if current.key and current.key.kind != "api":
+        raise HTTPException(403, "Agent access tokens cannot manage credentials")
+    user = current.user
     key = await session.get(db.APIKey, key_id)
-    if not key or key.user_id != user.id or (identity.key and key.id != identity.key.id):
+    if not key or key.user_id != user.id or (current.key and key.id != current.key.id):
         raise HTTPException(404, "Key not found")
-    if identity.key:
-        caller = await session.get(db.APIKey, identity.key.id)
-        if caller.revoked or aware(caller.expires_at) <= db.now() or not await db.active_membership(session, user, caller.team_id):
-            raise HTTPException(401, "Credential changed")
-        if caller.kind != "api" or "account" not in caller.permissions:
-            raise HTTPException(401, "Credential changed")
-    if identity.session:
-        browser = await session.get(db.BrowserSession, identity.session.digest)
-        if not browser or aware(browser.expires_at) <= db.now():
-            raise HTTPException(401, "Session changed")
     return user, key
 
 

@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     oidc_session_seconds: int = Field(default=28800, ge=300, le=86400)
     oidc_cache_seconds: int = Field(default=300, ge=10, le=3600)
     oidc_trusted_endpoint_origins: str = "[]"
+    guardrails_output_enabled: bool = False
+    guardrails_output_action: Literal["block", "redact"] = "block"
     guardrails_enabled: bool = False
     guardrails_action: Literal["block", "redact"] = "block"
     guardrails_detectors: str = '["secrets", "private_key"]'

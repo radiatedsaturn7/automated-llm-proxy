@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 
 from . import db
 from .config import get_settings
-from .security import Identity, admin, aware, digest
+from .security import Identity, admin, aware, digest, revalidate_admin
 
 router = APIRouter()
 _hash_slots = asyncio.Semaphore(2)
@@ -85,27 +85,6 @@ async def throttle(email, ip):
             row.attempts = min(row.attempts + 1, limit)
     if denied:
         raise HTTPException(429, "Login temporarily unavailable", headers={"Retry-After": "900"})
-
-
-async def revalidate_admin(session, identity):
-    """Recheck the original credential under the writer gate, not a stale snapshot."""
-    user = await session.get(db.User, identity.user.id)
-    if not user or not user.enabled or user.role != "admin":
-        raise HTTPException(403, "Administrator authorization changed")
-    if identity.key:
-        key = await session.get(db.APIKey, identity.key.id)
-        if (not key or key.kind != "api" or key.user_id != user.id or key.revoked
-                or key.digest != identity.key.digest or aware(key.expires_at) <= db.now()
-                or not isinstance(key.permissions, list) or "admin" not in key.permissions
-                or not await db.active_membership(session, user, key.team_id)):
-            raise HTTPException(403, "Administrator authorization changed")
-    elif identity.session:
-        browser = await session.get(db.BrowserSession, identity.session.digest)
-        if (not browser or browser.user_id != user.id or aware(browser.expires_at) <= db.now()
-                or browser.csrf != identity.session.csrf):
-            raise HTTPException(403, "Administrator authorization changed")
-    else:
-        raise HTTPException(403, "Administrator authorization required")
 
 
 @router.get("/auth/local/options")

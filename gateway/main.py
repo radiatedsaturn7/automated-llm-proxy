@@ -29,8 +29,12 @@ async def lifespan(app):
         limits=httpx.Limits(max_connections=200, max_keepalive_connections=50), follow_redirects=False, trust_env=False)
     app.state.accounting_tasks = set()
     yield
-    if app.state.accounting_tasks:
-        await asyncio.gather(*app.state.accounting_tasks, return_exceptions=True)
+    # Finishing a watchdog can spawn a settlement task. Drain every generation
+    # before disposing the upstream client/database, not just the first snapshot.
+    while app.state.accounting_tasks:
+        snapshot = list(app.state.accounting_tasks)
+        await asyncio.gather(*snapshot, return_exceptions=True)
+        app.state.accounting_tasks.difference_update(snapshot)
     await app.state.upstream.aclose()
     await db.engine.dispose()
 

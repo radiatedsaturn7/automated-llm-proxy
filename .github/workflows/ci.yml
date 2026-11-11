@@ -22,7 +22,7 @@ jobs:
       - uses: azure/setup-helm@v4.3.0
         with: {version: v3.17.3}
       - name: Validate maintenance chart rendering
-        run: python -m pip install pytest pyyaml && python -m pytest -q tests/test_maintenance_helm.py
+        run: python -m pip install pytest pyyaml && python -m pytest --noconftest -q tests/test_maintenance_helm.py
       - run: helm lint deploy/helm/llm-gateway --set existingSecret=test-secret
       - run: helm template test deploy/helm/llm-gateway --set existingSecret=test-secret > /tmp/rendered.yaml
       - run: helm template test deploy/helm/llm-gateway -f deploy/helm/llm-gateway/values-ha.yaml --set existingSecret=test-secret --set networkPolicy.enabled=true > /tmp/rendered-ha.yaml

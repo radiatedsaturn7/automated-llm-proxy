@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "automated-llm-proxy"
+version = "0.1.0"
+description = "Open-source stateless LLM gateway with external policy and accounting state"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn[standard]>=0.32,<1", "httpx>=0.28,<1",
+  "sqlalchemy[asyncio]>=2.0.36,<3", "asyncpg>=0.30,<1", "aiosqlite>=0.20,<1",
+  "pydantic-settings>=2.6,<3", "PyJWT[crypto]>=2.10,<3", "cryptography>=50,<51",
+  "prometheus-client>=0.21,<1"
+]
+[project.optional-dependencies]
+dev = ["pytest>=9.0.3,<10", "pytest-asyncio>=1.0,<2", "ruff>=0.9,<1", "pip-audit>=2.7,<3"]
+[project.scripts]
+llm-gateway = "gateway.cli:main"
+[tool.hatch.build.targets.wheel]
+packages = ["gateway"]
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+[tool.ruff]
+line-length = 110
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

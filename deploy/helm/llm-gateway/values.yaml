@@ -1,0 +1,73 @@
+replicaCount: 1
+image:
+  # Build and push the Dockerfile, then override repository/tag or digest.
+  repository: automated-llm-proxy
+  tag: '0.1.0'
+  digest: ''
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+nameOverride: ''
+fullnameOverride: ''
+existingSecret: '' # Required: DATABASE_URL, GATEWAY_MASTER_KEY, GATEWAY_SIGNING_KEY, BOOTSTRAP_TOKEN, METRICS_TOKEN.
+environment: production
+publicUrl: https://gateway.example.com
+extraEnv: [] # Non-secret settings only; use valueFrom.secretKeyRef for additional secrets.
+service:
+  port: 8080
+serviceAccount:
+  create: true
+  name: ''
+  annotations: {}
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: '2'
+    memory: 1Gi
+terminationGracePeriodSeconds: 90
+migration:
+  enabled: true
+  activeDeadlineSeconds: 300
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: '1', memory: 512Mi}
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+ingress:
+  enabled: false
+  className: ''
+  annotations: {}
+  host: gateway.example.com
+  tls: [] # Configure a certificate before exposing the service.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+networkPolicy:
+  enabled: false
+  # Configure peers for your ingress controller/scrapers and actual database/provider endpoints.
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8080}
+  egress:
+    - ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 127.0.0.0/8]
+      ports:
+        - {protocol: TCP, port: 443}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgresql}
+      ports:
+        - {protocol: TCP, port: 5432}

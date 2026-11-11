@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>LLM Gateway · Administration</title>
+  <link rel="stylesheet" href="/admin/static/style.css">
+  <script src="/admin/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header><div><span class="brand">LLM Gateway</span><span class="tag">Administration</span></div><div id="identity">Not signed in</div></header>
+  <main>
+    <section id="login" class="card narrow" aria-labelledby="login-title">
+      <p class="eyebrow">Operator access</p><h1 id="login-title">Manage your gateway</h1>
+      <p>Sign in with your identity provider, or use an administrator credential. Credentials entered here are kept in memory only.</p>
+      <a class="button" href="/auth/oidc/start">Sign in with SSO</a>
+      <form id="login-form"><label for="admin-token">Administrator API key</label><input id="admin-token" type="password" autocomplete="off" spellcheck="false" required><button type="submit">Connect</button></form>
+      <details><summary>First-run administrator setup</summary><p>Use only on a new installation with no users. The bootstrap token is different from an administrator API key.</p><form id="bootstrap-form"><label for="bootstrap-email">Administrator email</label><input id="bootstrap-email" type="email" required autocomplete="email"><label for="bootstrap-token">Installation bootstrap token</label><input id="bootstrap-token" type="password" required autocomplete="off" spellcheck="false"><button type="submit">Create initial administrator</button></form></details>
+      <p class="muted">Development release. Review the security checklist before production deployment.</p>
+    </section>
+    <div id="workspace" class="workspace" hidden>
+      <nav aria-label="Administration sections" id="navigation">
+        <button type="button" data-view="overview" aria-current="page">Overview</button>
+        <button type="button" data-view="teams">Teams</button>
+        <button type="button" data-view="users">Users</button>
+        <button type="button" data-view="providers">Providers</button>
+        <button type="button" data-view="keys">API keys</button>
+        <button type="button" data-view="audit">Audit</button>
+        <button type="button" data-view="evaluation">Evaluation</button>
+        <button type="button" id="disconnect">Sign out</button>
+      </nav>
+      <section id="content" tabindex="-1">
+        <div class="section-heading"><div><p class="eyebrow">Control plane</p><h1 id="view-title">Overview</h1></div><button type="button" id="refresh">Refresh</button></div>
+        <p id="view-description"></p>
+        <section id="summary" class="card" hidden></section>
+        <div id="table-wrap" class="card table-wrap"></div>
+        <section id="editor" class="card" hidden><h2 id="editor-title">Create</h2><form id="resource-form"></form></section>
+        <section id="evaluation" class="card" hidden>
+          <h2>Evaluate saved outputs</h2><p>Deterministic checks only. This does not call a model or store a prompt dataset.</p>
+          <form id="evaluation-form">
+            <label for="eval-cases">Cases (JSON array)</label><textarea id="eval-cases" rows="8" required spellcheck="false">[{"output":"Hello","expected":"Hello"}]</textarea>
+            <label for="eval-rules">Rules (JSON array)</label><textarea id="eval-rules" rows="3" required spellcheck="false">["exact_match"]</textarea>
+            <button type="submit">Run evaluation</button>
+          </form><pre id="eval-result" tabindex="0" aria-label="Evaluation results"></pre>
+        </section>
+      </section>
+    </div>
+    <div id="status" role="status" aria-live="polite"></div>
+    <div id="error" role="alert" hidden></div>
+    <dialog id="secret-dialog" aria-labelledby="secret-title">
+      <h2 id="secret-title">Copy your new credential</h2><p>It is shown only now. Store it in an approved secret manager. Closing this window clears the value from the page.</p>
+      <label for="new-secret">Credential</label><textarea id="new-secret" readonly rows="3" spellcheck="false" autocomplete="off"></textarea>
+      <div class="actions"><button type="button" id="copy-secret">Copy</button><button type="button" id="close-secret">I saved it · Close</button></div>
+      <p id="copy-status" role="status"></p>
+    </dialog>
+  </main>
+  <footer>Stateless application replicas · Durable governance in your database · Self-hosted</footer>
+</body>
+</html>

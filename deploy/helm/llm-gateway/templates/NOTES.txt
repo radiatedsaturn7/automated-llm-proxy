@@ -1,0 +1,9 @@
+Gateway deployed. Readiness checks database availability.
+
+Use a TLS ingress for non-local access. Review deploy/README.md before production.
+Secrets are sourced from the externally managed Secret {{ .Values.existingSecret }}.
+Rotate the BOOTSTRAP_TOKEN after initial setup; keep cryptographic keys stable across replicas.
+Do not rotate GATEWAY_MASTER_KEY without re-encrypting stored provider credentials.
+
+Forward locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "gateway.fullname" . }} 8080:{{ .Values.service.port }}

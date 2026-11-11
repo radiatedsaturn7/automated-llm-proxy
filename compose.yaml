@@ -1,0 +1,54 @@
+# Local installation. Public production endpoints require TLS, backups and HA infrastructure.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: gateway
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U gateway -d gateway']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  migrate:
+    build: .
+    image: automated-llm-proxy:local
+    command: [python, -m, gateway.migrate]
+    environment: &gateway-environment
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to postgresql+asyncpg://gateway:PASSWORD@postgres:5432/gateway}
+      GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?Set GATEWAY_MASTER_KEY}
+      GATEWAY_SIGNING_KEY: ${GATEWAY_SIGNING_KEY:?Set GATEWAY_SIGNING_KEY}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:?Set BOOTSTRAP_TOKEN}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+  gateway:
+    build: .
+    image: automated-llm-proxy:local
+    environment: *gateway-environment
+    ports: ['127.0.0.1:8080:8080']
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+volumes:
+  postgres-data:

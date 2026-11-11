@@ -86,3 +86,30 @@ def test_mock_hold_counts_once_and_releases():
         server.shutdown()
         server.server_close()
         worker.join(timeout=2)
+
+
+def test_harness_never_follows_redirect_or_environment_proxy(monkeypatch):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    drill = module('replica_drill')
+    visited = []
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_GET(self):
+            visited.append(self.path)
+            self.send_response(302)
+            self.send_header('Location', '/credential-leak')
+            self.end_headers()
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    monkeypatch.setenv('http_proxy', 'http://127.0.0.1:1')
+    monkeypatch.setenv('no_proxy', '')
+    monkeypatch.setattr(drill, 'BASES', (f'http://127.0.0.1:{server.server_port}',))
+    try:
+        assert drill.http(0, '/start', key='test-only')['status'] == 302
+        assert visited == ['/start']
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)

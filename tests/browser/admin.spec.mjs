@@ -44,6 +44,7 @@ test('fresh installation: real HTTP, bootstrap, administration, scoped keys and 
   const user = await create('users', { email: 'browser-member@example.test', team_id: team.id, budget_usd: '10' });
   await expect(page.locator('tbody')).toContainText('browser-member@example.test');
   const key = await create('keys', { name: 'browser-client', user_id: user.id, team_id: team.id, allowed_models: '["smoke-only"]' });
+  expect(key.permissions).toEqual(["inference"]);
   await expect(page.locator('#secret-dialog')).toBeVisible();
   expect(Boolean(await page.locator('#new-secret').inputValue())).toBe(true);
   await page.locator('#close-secret').click();

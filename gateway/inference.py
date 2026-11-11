@@ -12,7 +12,7 @@ from sqlalchemy import select
 from . import db, policy
 from .config import get_settings
 from .providers import StreamTranslator, response_headers, translate_response, upstream_request
-from .security import identify
+from .security import inference_identity
 
 router = APIRouter()
 log = logging.getLogger("gateway")
@@ -93,7 +93,7 @@ def validate_payload(payload, endpoint):
 
 @router.get("/v1/models")
 async def models(request: Request):
-    identity = await identify(request)
+    identity = await inference_identity(request)
     async with db.session_factory() as s:
         providers = (await s.scalars(select(db.Provider).where(db.Provider.enabled.is_(True)))).all()
     aliases = sorted({alias for p in providers for alias in p.models
@@ -132,7 +132,7 @@ async def finish_request(request, response, reservation_id, model, provider, rou
 
 
 async def infer(request, endpoint):
-    identity = await identify(request)
+    identity = await inference_identity(request)
     try:
         payload = validate_payload(await request.json(), endpoint)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:

@@ -7,7 +7,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from . import db
-from .security import Identity, admin
+from .security import Identity, provisioning
 from .schemas import UserCreate
 
 PREFIX = "urn:ietf:params:scim:schemas:"
@@ -44,7 +44,7 @@ class SCIMRoute(APIRoute):
         return wrapped
 
 
-router = APIRouter(prefix="/scim/v2", route_class=SCIMRoute, dependencies=[Depends(admin)])
+router = APIRouter(prefix="/scim/v2", route_class=SCIMRoute, dependencies=[Depends(provisioning)])
 
 
 def fail(message, status=400):
@@ -104,7 +104,7 @@ async def service_config():
             {
                 "type": "oauthbearertoken",
                 "name": "Administrator bearer credential",
-                "description": "Provision with a restricted-lifetime gateway administrator API key",
+                "description": "Provision with a restricted-lifetime provisioning-scoped gateway key owned by an administrator",
             }
         ],
     }
@@ -260,7 +260,7 @@ def email(value):
 
 
 @router.post("/Users", status_code=201)
-async def create_user(request: Request, identity: Identity = Depends(admin)):
+async def create_user(request: Request, identity: Identity = Depends(provisioning)):
     body = await payload(request, {"schemas", "userName", "active", "externalId"})
     if body.get("schemas") != [USER] or not isinstance(body.get("active", True), bool):
         fail("Invalid user schema or active attribute")
@@ -277,7 +277,7 @@ async def create_user(request: Request, identity: Identity = Depends(admin)):
 
 
 @router.patch("/Users/{resource_id}")
-async def patch_user(resource_id: str, request: Request, identity: Identity = Depends(admin)):
+async def patch_user(resource_id: str, request: Request, identity: Identity = Depends(provisioning)):
     body = await payload(request, {"schemas", "Operations"})
     ops = body.get("Operations")
     if (
@@ -327,7 +327,7 @@ async def patch_user(resource_id: str, request: Request, identity: Identity = De
 
 
 @router.delete("/Users/{resource_id}", status_code=204)
-async def disable_user(resource_id: str, identity: Identity = Depends(admin)):
+async def disable_user(resource_id: str, identity: Identity = Depends(provisioning)):
     async with db.transaction() as session:
         user = await session.get(db.User, resource_id)
         if not user:
@@ -375,7 +375,7 @@ async def set_members(session, group, members):
 
 
 @router.post("/Groups", status_code=201)
-async def create_group(request: Request, identity: Identity = Depends(admin)):
+async def create_group(request: Request, identity: Identity = Depends(provisioning)):
     body = await payload(request, {"schemas", "displayName", "members", "externalId"})
     name = body.get("displayName")
     if body.get("schemas") != [GROUP] or not isinstance(name, str) or not 1 <= len(name) <= 120:
@@ -414,7 +414,7 @@ def group_name(value):
 
 
 @router.put("/Users/{resource_id}")
-async def replace_user(resource_id: str, request: Request, identity: Identity = Depends(admin)):
+async def replace_user(resource_id: str, request: Request, identity: Identity = Depends(provisioning)):
     body = await payload(request, {"schemas", "id", "meta", "userName", "active", "externalId"})
     if (
         body.get("schemas") != [USER]
@@ -438,7 +438,7 @@ async def replace_user(resource_id: str, request: Request, identity: Identity = 
 
 
 @router.patch("/Groups/{resource_id}")
-async def patch_group(resource_id: str, request: Request, identity: Identity = Depends(admin)):
+async def patch_group(resource_id: str, request: Request, identity: Identity = Depends(provisioning)):
     body = await payload(request, {"schemas", "Operations"})
     ops = patch_operations(body)
     async with db.transaction() as session:

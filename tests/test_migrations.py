@@ -163,3 +163,31 @@ async def test_versioned_v2_upgrade_preserves_scim_identifiers(migration_engine)
     async with migration_engine.connect() as conn:
         assert (await conn.execute(select(db.Team.scim_external_id))).scalar() == "idp-group"
         assert (await conn.execute(select(db.PromptTemplate.id))).scalars().all() == []
+
+
+async def test_v4_backfills_legacy_authority_and_preserves_key_data(migration_engine):
+    from datetime import datetime, timedelta, timezone
+    from gateway.migrations import v0002, v0003
+    async with migration_engine.begin() as conn:
+        for revision in (v0001, v0002, v0003):
+            await conn.run_sync(revision.upgrade)
+        await conn.run_sync(version_metadata.create_all)
+        for number in (1, 2, 3):
+            await conn.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
+        users, keys = v0003.metadata.tables["users"], v0003.metadata.tables["api_keys"]
+        for role in ("admin", "member"):
+            await conn.execute(users.insert().values(id=role, email=role + "@example.com", role=role, enabled=True))
+            for kind in ("api", "agent"):
+                key_id = role + kind
+                await conn.execute(keys.insert().values(id=key_id, name=key_id, prefix="old-prefix", digest=key_id,
+                    user_id=role, kind=kind, expires_at=datetime.now(timezone.utc) + timedelta(days=5),
+                    revoked=False, allowed_models=["restricted-model"], rpm=17, tpm=9876, created_at=datetime.now(timezone.utc)))
+    assert await migrate() == HEAD
+    async with migration_engine.connect() as conn:
+        rows = (await conn.execute(select(db.APIKey.__table__))).mappings().all()
+        for row in rows:
+            expected = ["inference"] if row["kind"] == "agent" else (
+                ["admin", "inference", "account", "provisioning"] if row["user_id"] == "admin" else ["inference", "account"])
+            assert row["permissions"] == expected
+            assert row["allowed_models"] == ["restricted-model"] and row["rpm"] == 17
+            assert row["digest"] == row["id"] and row["prefix"] == "old-prefix"

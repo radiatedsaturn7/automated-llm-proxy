@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Strict(BaseModel):
@@ -82,6 +82,17 @@ class KeyCreate(Strict):
     team_id: str | None = None
     expires_in_days: int = Field(default=30, ge=1, le=365)
     kind: Literal["api", "agent"] = "api"
+    permissions: list[Literal["inference", "admin", "account", "provisioning"]] = Field(
+        default_factory=lambda: ["inference"], min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_permissions(self):
+        if len(set(self.permissions)) != len(self.permissions):
+            raise ValueError("Duplicate credential permissions")
+        if self.kind == "agent" and self.permissions != ["inference"]:
+            raise ValueError("Agent credentials permit inference only")
+        return self
+
     allowed_models: list[str] = Field(default_factory=list, max_length=100)
     rpm: int = Field(default=60, ge=1, le=100000)
     tpm: int = Field(default=100000, ge=1, le=100000000)

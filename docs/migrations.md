@@ -72,3 +72,11 @@ report tables. It leaves v1/v2 policy, accounting and SCIM data untouched. Only
 administrators explicitly submitting templates store prompt content; inference
 traffic is not retained. See [prompts.md](prompts.md) for plaintext-storage and
 retention limitations. Existing versioned v2 schemas are validated before upgrade.
+
+## Revision 4: explicit credential permissions
+
+Revision 4 adds non-null JSON `api_keys.permissions` with an inference-only database
+default. Its explicit legacy backfill preserves existing authority by owner role
+and credential kind; key secrets, revocation, expiry, budgets and model policies are
+unchanged. See [credential-permissions.md](credential-permissions.md) before rollout
+and review broad legacy administrator credentials after upgrading.

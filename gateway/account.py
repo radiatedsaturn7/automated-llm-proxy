@@ -4,13 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from . import db
 from .admin import record
-from .security import Identity, aware, identify, new_key
+from .security import Identity, aware, identify, new_key, require_permission
 
 router = APIRouter(prefix="/account/api")
 
 
 async def member(request: Request):
     identity = await identify(request, allow_session=True)
+    require_permission(identity, "account")
     if identity.key and identity.key.kind == "agent":
         raise HTTPException(403, "Agent access tokens cannot manage credentials")
     return identity
@@ -70,7 +71,9 @@ async def owned(session, identity, key_id):
         raise HTTPException(404, "Key not found")
     if identity.key:
         caller = await session.get(db.APIKey, identity.key.id)
-        if caller.revoked or aware(caller.expires_at) <= db.now():
+        if caller.revoked or aware(caller.expires_at) <= db.now() or caller.team_id != user.team_id:
+            raise HTTPException(401, "Credential changed")
+        if caller.kind != "api" or "account" not in caller.permissions:
             raise HTTPException(401, "Credential changed")
     if identity.session:
         browser = await session.get(db.BrowserSession, identity.session.digest)
@@ -101,6 +104,7 @@ async def rotate(key_id: str, identity: Identity = Depends(member)):
             key.team_id,
             key.name,
             kind=key.kind,
+            permissions=key.permissions,
             allowed_models=key.allowed_models,
             rpm=key.rpm,
             tpm=key.tpm,

@@ -70,6 +70,7 @@ class APIKey(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
     kind: Mapped[str] = mapped_column(String(16), default="api")
+    permissions: Mapped[list] = mapped_column(JSON, default=lambda: ["inference"], server_default=text('\'["inference"]\''))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     allowed_models: Mapped[list] = mapped_column(JSON, default=list)

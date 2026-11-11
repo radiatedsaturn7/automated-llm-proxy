@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Integer, MetaData, Table, inspect, select, text
 
 from . import db
-from .migrations import HEAD, REVISIONS, v0001, v0002, v0003
+from .migrations import HEAD, REVISIONS, v0001, v0002, v0003, v0004
 
 version_metadata = MetaData()
 versions = Table("gateway_schema_versions", version_metadata,
@@ -19,6 +19,12 @@ class MigrationError(RuntimeError):
 
 
 def expected_server_default(connection, table, column, actual_default):
+    if column.server_default is not None:
+        expected = str(column.server_default.arg)
+        actual = actual_default or ""
+        if connection.dialect.name == "postgresql" and actual.endswith("::json"):
+            actual = actual[:-6]
+        return actual == expected
     if actual_default is None:
         return True
     # PostgreSQL implements an implicit integer autoincrement PK as SERIAL.
@@ -39,7 +45,7 @@ def validate_v1(connection):
 
 
 def validate_head(connection):
-    validate_schema(connection, v0003.metadata)
+    validate_schema(connection, v0004.metadata)
 
 
 def validate_schema(connection, expected):
@@ -99,7 +105,7 @@ def _upgrade(connection, adopt_v1=False):
     if not applied and set(inspect(connection).get_table_names()) != {versions.name}:
         raise MigrationError("Schema exists without revision history; refusing partial initialization")
     if applied:
-        validate_schema(connection, {1: v0001.Base.metadata, 2: v0002.metadata, 3: v0003.metadata}[applied[-1]])
+        validate_schema(connection, {1: v0001.Base.metadata, 2: v0002.metadata, 3: v0003.metadata, 4: v0004.metadata}[applied[-1]])
     for number, revision in REVISIONS:
         if number not in applied:
             revision.upgrade(connection)

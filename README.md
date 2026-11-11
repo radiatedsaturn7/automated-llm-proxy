@@ -15,6 +15,7 @@ Apache-2.0 LLM gateway with a stateless application tier and external SQL policy
 - OIDC SSO with PKCE, verified identity tokens, nested group mappings, bounded metadata/JWKS caching, configurable sessions and CSRF protection; explicit identity linking and session revocation.
 - A bounded SCIM Users/Groups subset, signed OIDC back-channel logout, administrator console and member self-service portal.
 - Default-off administrator-provisioned local password fallback with shared throttles and scoped session revocation.
+- Privileged mutations revalidate authority under the shared writer lock; opt-in generated-output safeguards preserve provider billing and fail closed on unsupported content.
 - Immutable prompt versions, literal variable previews and saved deterministic offline evaluations, without paid evaluation model calls.
 - Metadata audit/usage records, signed-cursor exports, request correlation, protected Prometheus metrics and example dashboards/alerts.
 - Docker Compose, Helm/HA settings, Terraform Helm deployment, serialized migrations and CI checks.

@@ -1,7 +1,8 @@
-"""Deterministic inbound heuristics. No network calls, dynamic plugins or content logging."""
+"""Deterministic content heuristics. No network calls, dynamic plugins or content logging."""
 from copy import deepcopy
 from dataclasses import dataclass
 import json
+import math
 import re
 from types import MappingProxyType
 from typing import Protocol
@@ -53,7 +54,7 @@ class GuardrailRejected(ValueError):
     def __init__(self, reason, counts=None):
         self.reason = reason
         self.counts = dict(counts or {})
-        super().__init__("Inbound content rejected by gateway policy")
+        super().__init__("Content rejected by gateway policy")
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,7 @@ def preflight(payload, endpoint, settings):
                         raise GuardrailRejected("scan_limit")
                     try:
                         decoded = json.loads(arguments, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+                        json.dumps(decoded, allow_nan=False)
                     except (ValueError, TypeError, RecursionError):
                         raise GuardrailRejected("invalid_tool_arguments") from None
                     function["arguments"] = json.dumps(walk(decoded), ensure_ascii=False, allow_nan=False)
@@ -172,3 +174,106 @@ def preflight(payload, endpoint, settings):
     if walk(metadata) != metadata:
         raise GuardrailRejected("sensitive_metadata", counts)
     return GuardrailResult(result, counts)
+
+
+def embedding_postflight(payload, settings):
+    """Only finite numeric vectors are excluded; every metadata field is scanned."""
+    from types import SimpleNamespace
+    if (not isinstance(payload, dict) or set(payload) - {"object", "model", "data", "usage"}
+            or payload.get("object") != "list" or not isinstance(payload.get("model"), str)):
+        raise GuardrailRejected("unsupported_embedding_output")
+    items = payload.get("data")
+    if not isinstance(items, list) or not 1 <= len(items) <= 1000:
+        raise GuardrailRejected("unsupported_embedding_output")
+    metadata = {k: v for k, v in payload.items() if k != "data"}
+    metadata["data"] = []
+    dimensions, total = None, 0
+    for index, item in enumerate(items):
+        if (not isinstance(item, dict) or set(item) != {"object", "index", "embedding"}
+                or item["object"] != "embedding" or type(item["index"]) is not int or item["index"] != index):
+            raise GuardrailRejected("unsupported_embedding_output")
+        vector = item["embedding"]
+        if not isinstance(vector, list) or not 1 <= len(vector) <= 65536:
+            raise GuardrailRejected("unsupported_embedding_vector")
+        total += len(vector)
+        if total > 1_000_000 or (dimensions is not None and dimensions != len(vector)):
+            raise GuardrailRejected("embedding_output_limit")
+        dimensions = len(vector)
+        try:
+            if any(type(value) not in {int, float} or not math.isfinite(value) for value in vector):
+                raise GuardrailRejected("unsupported_embedding_vector")
+        except OverflowError:
+            raise GuardrailRejected("unsupported_embedding_vector") from None
+        metadata["data"].append({k: v for k, v in item.items() if k != "embedding"})
+    if "usage" in payload:
+        usage = payload["usage"]
+        if (not isinstance(usage, dict) or set(usage) - {"prompt_tokens", "completion_tokens", "total_tokens"}
+                or any(type(value) is not int or value < 0 for value in usage.values())):
+            raise GuardrailRejected("unsupported_embedding_usage")
+    cfg = SimpleNamespace(guardrails_enabled=True, guardrails_action="block",
+                          guardrails_detectors=settings.guardrails_detectors,
+                          guardrails_max_characters=settings.guardrails_max_characters)
+    preflight({"messages": [], "output_metadata": metadata}, "chat", cfg)
+    return GuardrailResult(payload, {})
+
+
+def postflight(payload, settings, endpoint="chat"):
+
+    """Inspect normalized, non-streaming text output; never alter accounting metadata."""
+    if not settings.guardrails_output_enabled:
+        return GuardrailResult(payload, {})
+    if endpoint == "embeddings":
+        return embedding_postflight(payload, settings)
+    from types import SimpleNamespace
+    if not isinstance(payload, dict) or set(payload) - {
+        "id", "object", "created", "model", "choices", "usage", "system_fingerprint", "service_tier"
+    }:
+        raise GuardrailRejected("unsupported_output")
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not 1 <= len(choices) <= 128:
+        raise GuardrailRejected("unsupported_output")
+    messages, metadata = [], {k: v for k, v in payload.items() if k != "choices"}
+    metadata["choices"] = []
+    for choice in choices:
+        if not isinstance(choice, dict) or set(choice) - {"index", "message", "finish_reason", "logprobs"}:
+            raise GuardrailRejected("unsupported_output")
+        if choice.get("logprobs") is not None:
+            raise GuardrailRejected("unsupported_output_logprobs")
+        message = choice.get("message")
+        if (not isinstance(message, dict) or message.get("role") != "assistant"
+                or set(message) - {"role", "content", "refusal", "tool_calls", "function_call", "annotations"}
+                or ("annotations" in message and message["annotations"] != [])):
+            raise GuardrailRejected("unsupported_output_message")
+        for field in ("content", "refusal"):
+            if message.get(field) is not None and not isinstance(message[field], str):
+                raise GuardrailRejected("unsupported_output_multimodal")
+        calls = message.get("tool_calls", [])
+        if not isinstance(calls, list) or len(calls) > 100:
+            raise GuardrailRejected("unsupported_output_tools")
+        for call in calls:
+            if (not isinstance(call, dict) or set(call) != {"id", "type", "function"}
+                    or call.get("type") != "function" or not isinstance(call.get("id"), str)):
+                raise GuardrailRejected("unsupported_output_tools")
+        functions = [call["function"] for call in calls]
+        if "function_call" in message:
+            functions.append(message["function_call"])
+        for function in functions:
+            if (not isinstance(function, dict) or set(function) != {"name", "arguments"}
+                    or not isinstance(function["name"], str) or not isinstance(function["arguments"], str)):
+                raise GuardrailRejected("unsupported_output_tools")
+        # Refusals are generated content too. Scan separately so they can be
+        # redacted without modifying structural/routing metadata.
+        messages.extend([{k: v for k, v in message.items() if k != "refusal"},
+                         {"role": "assistant", "content": message.get("refusal")}])
+        metadata["choices"].append({k: v for k, v in choice.items() if k != "message"})
+    cfg = SimpleNamespace(guardrails_enabled=True, guardrails_action=settings.guardrails_output_action,
+                          guardrails_detectors=settings.guardrails_detectors,
+                          guardrails_max_characters=settings.guardrails_max_characters)
+    inspected = preflight({"messages": messages, "output_metadata": metadata}, "chat", cfg)
+    result = deepcopy(payload)
+    for index, choice in enumerate(result["choices"]):
+        original = choice["message"]
+        choice["message"] = inspected.payload["messages"][index * 2]
+        if "refusal" in original:
+            choice["message"]["refusal"] = inspected.payload["messages"][index * 2 + 1]["content"]
+    return GuardrailResult(result, inspected.counts)

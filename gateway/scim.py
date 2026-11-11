@@ -7,7 +7,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from . import db
-from .security import Identity, provisioning
+from .security import Identity, provisioning, revalidate_provisioning
 from .schemas import UserCreate
 
 PREFIX = "urn:ietf:params:scim:schemas:"
@@ -276,6 +276,7 @@ async def create_user(request: Request, identity: Identity = Depends(provisionin
     name = email(body.get("userName"))
     external_id = external(body.get("externalId"))
     async with db.transaction() as session:
+        await revalidate_provisioning(session, identity)
         user = db.User(
             email=name, enabled=body.get("active", True), role="member", scim_external_id=external_id, scim_managed=True
         )
@@ -315,6 +316,7 @@ async def patch_user(resource_id: str, request: Request, identity: Identity = De
     if "externalId" in changes:
         changes["externalId"] = external(changes["externalId"])
     async with db.transaction() as session:
+        await revalidate_provisioning(session, identity)
         user = await session.get(db.User, resource_id)
         if not user:
             fail("Resource not found", 404)
@@ -339,6 +341,7 @@ async def patch_user(resource_id: str, request: Request, identity: Identity = De
 @router.delete("/Users/{resource_id}", status_code=204)
 async def disable_user(resource_id: str, identity: Identity = Depends(provisioning)):
     async with db.transaction() as session:
+        await revalidate_provisioning(session, identity)
         user = await session.get(db.User, resource_id)
         if not user:
             fail("Resource not found", 404)
@@ -394,6 +397,7 @@ async def create_group(request: Request, identity: Identity = Depends(provisioni
     if body.get("schemas") != [GROUP] or not isinstance(name, str) or not 1 <= len(name) <= 120:
         fail("Invalid group schema or displayName")
     async with db.transaction() as session:
+        await revalidate_provisioning(session, identity)
         group = db.Team(name=name, enabled=True, scim_external_id=external(body.get("externalId")))
         session.add(group)
         await session.flush()
@@ -437,6 +441,7 @@ async def replace_user(resource_id: str, request: Request, identity: Identity = 
         fail("Invalid replacement user schema, id or active attribute")
     name, external_id = email(body.get("userName")), external(body.get("externalId"))
     async with db.transaction() as session:
+        await revalidate_provisioning(session, identity)
         user = await session.get(db.User, resource_id)
         if not user:
             fail("Resource not found", 404)
@@ -456,6 +461,7 @@ async def patch_group(resource_id: str, request: Request, identity: Identity = D
     body = await payload(request, {"schemas", "Operations"})
     ops = patch_operations(body)
     async with db.transaction() as session:
+        await revalidate_provisioning(session, identity)
         group = await session.get(db.Team, resource_id)
         if not group:
             fail("Resource not found", 404)

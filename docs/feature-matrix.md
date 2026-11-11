@@ -18,7 +18,7 @@ This is a working foundation under active development, **not** a fully enterpris
 | Monitoring | Health/readiness and metrics integration in application/deployment | Correlation IDs, bounded route metrics, structured metadata logs, example dashboards/alerts; SLO ownership remains operator work |
 | Advanced reliability | DB-shared per-model circuits, next-request routing, leased half-open probes and stale-completion fencing | No same-request replay, automatic model equivalence, exactly-once inference or failover SLA |
 | Extensibility | Explicit source-level provider adapters | No untrusted plugin loader or isolation sandbox |
-| Governance | Model scopes, privileged provider configuration and opt-in inbound block/redact heuristics | Fixed reviewed detectors, no output scanning, complete DLP coverage, moderation suite, compliance attestation or data residency enforcement |
+| Governance | Model scopes, privileged provider configuration and opt-in inbound/output block/redact heuristics | Fixed reviewed detectors; output policy rejects streaming and unsupported content; no complete DLP coverage, moderation suite, compliance attestation or data residency enforcement |
 
 ## Verification status
 

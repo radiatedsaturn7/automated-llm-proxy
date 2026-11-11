@@ -4,7 +4,7 @@ from pydantic import Field
 from . import db
 from .evaluation import evaluate
 from .schemas import Strict
-from .security import Identity, admin
+from .security import Identity, admin, revalidate_admin
 
 router = APIRouter(prefix="/admin/api/evaluation-comparisons", tags=["evaluation"])
 
@@ -40,6 +40,7 @@ async def compare(body: Comparison, identity: Identity = Depends(admin)):
             improvements.append(after["index"])
     accepted = new["pass_rate"] >= body.minimum_pass_rate and len(regressions) <= body.maximum_regressions
     async with db.transaction() as session:
+        await revalidate_admin(session, identity)
         await db.audit(session, identity.user.id, "evaluation.compare", cases=len(body.cases),
                        rules=body.rules, accepted=accepted, regressions=len(regressions))
     return {**reports, "regression_indices": regressions, "improvement_indices": improvements,

@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 
 from . import db
 from .evaluation import evaluate
-from .security import Identity, admin, aware
+from .security import Identity, admin, revalidate_admin, aware
 
 router = APIRouter(prefix="/admin/api/prompt-registry", tags=["prompt-registry"])
 VARIABLE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]{0,63})\}\}")
@@ -88,6 +88,7 @@ async def get_version(session, template_id, number):
 @router.post("/templates", status_code=201)
 async def create(body: CreateBody, identity: Identity = Depends(admin)):
     async with db.transaction() as session:
+        await revalidate_admin(session, identity)
         template = db.PromptTemplate(name=body.name, created_by=identity.user.id)
         session.add(template)
         await session.flush()
@@ -119,6 +120,7 @@ async def get_template(template_id: str, identity: Identity = Depends(admin)):
 @router.patch("/templates/{template_id}")
 async def patch(template_id: str, body: PatchBody, identity: Identity = Depends(admin)):
     async with db.transaction() as session:
+        await revalidate_admin(session, identity)
         row = await session.get(db.PromptTemplate, template_id)
         if row is None:
             raise HTTPException(404, "Prompt template not found")
@@ -133,6 +135,7 @@ async def patch(template_id: str, body: PatchBody, identity: Identity = Depends(
 @router.post("/templates/{template_id}/versions", status_code=201)
 async def append_version(template_id: str, body: VersionBody, identity: Identity = Depends(admin)):
     async with db.transaction() as session:
+        await revalidate_admin(session, identity)
         template = await session.get(db.PromptTemplate, template_id)
         if template is None:
             raise HTTPException(404, "Prompt template not found")
@@ -184,6 +187,7 @@ async def run(template_id: str, number: int, body: RunBody, identity: Identity =
     except ValueError as error:
         raise HTTPException(400, str(error)) from None
     async with db.transaction() as session:
+        await revalidate_admin(session, identity)
         version = await get_version(session, template_id, number)
         row = db.EvaluationRun(prompt_version_id=version.id, rules=body.rules, report=report, created_by=identity.user.id)
         session.add(row)

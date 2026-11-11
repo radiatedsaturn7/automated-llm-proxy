@@ -97,3 +97,44 @@ Do not define duplicate `GUARDRAILS_*` names in `extraEnv`. Enabling guards can
 reject previously accepted traffic, particularly multimodal/tokenized inputs.
 Test with non-sensitive fixtures before rollout, and review metadata-only block
 counts. There is no monitor-only bypass or silent fail-open mode.
+
+## Optional generated-output policy
+
+`GUARDRAILS_OUTPUT_ENABLED=false` keeps output inspection off by default. Set it to
+`true` to inspect normalized, non-streaming chat results, including the stateless
+Responses compatibility endpoint. `GUARDRAILS_OUTPUT_ACTION=block` is the default;
+`redact` is an explicit alternative. Output policy shares `GUARDRAILS_DETECTORS`
+and `GUARDRAILS_MAX_CHARACTERS` with inbound policy but does not require inbound
+policy to be enabled. Every replica must use the same configuration.
+
+Supported output is plain assistant text, refusal text, and JSON-encoded function
+arguments. Refusals are scanned too. Routing/structural metadata, names, IDs, usage,
+and JSON keys are scanned but never rewritten: a detected match there blocks even
+in redact mode. Unknown top-level/message/choice fields, multimodal output, non-null
+logprobs and nonempty annotations fail closed rather than returning uninspected data.
+This conservative contract may reject otherwise valid vendor extensions. Upstream
+request-ID headers are omitted while output policy is enabled because opaque IDs can
+also carry uninspected data. Gateway-generated request/reservation IDs remain.
+
+Streaming requests are rejected **before dispatch or budget reservation** when output
+policy is enabled. This version does not buffer or scan partial streams, and does not
+pretend it can retract already-delivered bytes. Embeddings require a strict float-vector
+envelope: unknown response fields are rejected and non-vector metadata is scanned,
+but the numeric vectors themselves are not semantically inspected. Base64 embedding
+requests are rejected before dispatch under output policy. Use inbound scanning and
+upstream data policies for embedding workloads. Policy bounds embedding responses to
+1,000 rows, consistent dimensions up to 65,536 and one million total numeric values.
+
+A provider has already performed and may bill for work before output inspection.
+Reported usage is finalized normally before blocking/redacting the result, and missing
+usage remains conservatively estimated. Blocking output does not refund usage or mark
+a healthy provider as failed. Audit events record only the static reason and detector
+counts; blocked text, matched substrings and entire response bodies are not retained.
+HTTP denial is generic. Operators can distinguish `output_blocked` inference metrics
+from upstream failures.
+
+All heuristic limitations above still apply: this is not complete DLP, a moderation
+service, semantic safety validation or a compliance guarantee. Encoded/obfuscated
+secrets and values split across fields may evade detection. Redaction may change tool
+argument meaning; applications must still validate tool schemas and never automatically
+trust or execute generated instructions.

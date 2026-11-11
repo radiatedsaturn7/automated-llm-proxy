@@ -47,24 +47,20 @@ def upstream_request(provider, route, payload, endpoint):
         raise HTTPException(400, "Unsupported provider adapter")
     if endpoint != "chat/completions":
         raise HTTPException(400, "This provider supports chat only")
-    unsupported = {"tools", "tool_choice", "response_format", "seed", "presence_penalty", "frequency_penalty", "parallel_tool_calls", "max_completion_tokens", "reasoning_effort", "stream_options"}
-    if set(payload) & unsupported:
+    allowed = {'model', 'messages', 'max_tokens', 'temperature', 'top_p', 'stop', 'stream',
+               'tools', 'tool_choice', 'parallel_tool_calls'}
+    if set(payload) - allowed:
         raise HTTPException(400, "Unsupported Anthropic request parameters")
-    if any(not isinstance(m.get("content"), str) or "tool_calls" in m or m.get("role") == "tool" for m in body["messages"]):
-        raise HTTPException(400, "Anthropic adapter supports text chat only in this release")
     if "temperature" in payload and "top_p" in payload:
         raise HTTPException(400, "Choose temperature or top_p for Anthropic")
-    system = []
-    messages = []
-    for message in body["messages"]:
-        if message["role"] in {"system", "developer"}:
-            system.append(message["content"])
-        elif message["role"] in {"user", "assistant"}:
-            messages.append({"role": message["role"], "content": message["content"]})
-        else:
-            raise HTTPException(400, "Unsupported Anthropic message role")
+    try:
+        tool_options = anthropic_tools(payload)
+        system, messages = anthropic_messages(body["messages"])
+    except (ValueError, TypeError, KeyError, RecursionError) as exc:
+        raise HTTPException(400, "Invalid or unsupported Anthropic tool/message parameters") from exc
     body = {"model": route["upstream_model"], "messages": messages,
             "max_tokens": payload["max_tokens"], "stream": payload.get("stream", False)}
+    body.update(tool_options)
     if system:
         body["system"] = "\n\n".join(system)
     for field in ["temperature", "top_p", "stop"]:
@@ -73,6 +69,168 @@ def upstream_request(provider, route, payload, endpoint):
             body["stop_sequences" if field == "stop" else field] = [value] if field == "stop" and isinstance(value, str) else value
     return provider.base_url + "/messages", {"x-api-key": decrypt(provider.encrypted_key),
             "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, body
+
+
+def json_object(value):
+    def pairs(items):
+        result = {}
+        for key, item in items:
+            if key in result:
+                raise ValueError('Duplicate JSON key')
+            result[key] = item
+        return result
+    def invalid(value):
+        raise ValueError('Non-finite JSON number')
+    if not isinstance(value, str) or len(value) > 1_048_576:
+        raise ValueError('Invalid tool arguments')
+    try:
+        obj = json.loads(value, object_pairs_hook=pairs, parse_constant=invalid)
+        json.dumps(obj, allow_nan=False)  # Also reject finite-literal overflow, e.g. 1e309.
+    except RecursionError as exc:
+        raise ValueError('Tool JSON nesting too deep') from exc
+    if not isinstance(obj, dict):
+        raise ValueError('Tool arguments must be an object')
+    return obj
+
+
+def tool_name(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', value):
+        raise ValueError('Invalid tool name')
+    return value
+
+
+def tool_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', value):
+        raise ValueError('Invalid tool ID')
+    return value
+
+
+def anthropic_tools(payload):
+    result = {}
+    if 'tools' not in payload:
+        if 'tool_choice' in payload or 'parallel_tool_calls' in payload:
+            raise ValueError('Tool controls require tools')
+        return result
+    tools = payload['tools']
+    if not isinstance(tools, list) or not 1 <= len(tools) <= 128:
+        raise ValueError('Between one and 128 tools required')
+    names, translated = set(), []
+    for item in tools:
+        if not isinstance(item, dict) or set(item) != {'type', 'function'} or item['type'] != 'function':
+            raise ValueError('Only function tools supported')
+        fn = item['function']
+        if not isinstance(fn, dict) or set(fn) - {'name', 'description', 'parameters'}:
+            raise ValueError('Unsupported function parameters; strict schemas not supported')
+        name = tool_name(fn.get('name'))
+        if name in names:
+            raise ValueError('Duplicate function name')
+        names.add(name)
+        schema = fn.get('parameters', {'type': 'object', 'properties': {}})
+        if not isinstance(schema, dict) or schema.get('type') != 'object':
+            raise ValueError('Function parameters must be an object schema')
+        # Reject non-JSON and non-finite values rather than emitting invalid JSON.
+        json.dumps(schema, allow_nan=False)
+        tool = {'name': name, 'input_schema': schema}
+        if 'description' in fn:
+            if not isinstance(fn['description'], str):
+                raise ValueError('Invalid function description')
+            tool['description'] = fn['description']
+        translated.append(tool)
+    choice = payload.get('tool_choice', 'auto')
+    if isinstance(choice, str) and choice in {'auto', 'required', 'none'}:
+        choice = {'type': {'auto': 'auto', 'required': 'any', 'none': 'none'}[choice]}
+    elif (isinstance(choice, dict) and set(choice) == {'type', 'function'} and choice['type'] == 'function'
+          and isinstance(choice['function'], dict) and set(choice['function']) == {'name'}
+          and choice['function']['name'] in names):
+        choice = {'type': 'tool', 'name': choice['function']['name']}
+    else:
+        raise ValueError('Invalid tool choice')
+    if 'parallel_tool_calls' in payload:
+        if type(payload['parallel_tool_calls']) is not bool or choice['type'] == 'none':
+            raise ValueError('Unsupported parallel tool setting')
+        choice['disable_parallel_tool_use'] = not payload['parallel_tool_calls']
+    return {'tools': translated, 'tool_choice': choice}
+
+
+def anthropic_messages(source):
+    system, messages, pending, seen = [], [], set(), set()
+    for message in source:
+        if not isinstance(message, dict) or set(message) - {'role', 'content', 'tool_calls', 'tool_call_id'}:
+            raise ValueError('Unsupported Anthropic message fields')
+        role, content = message.get('role'), message.get('content')
+        if role == 'tool':
+            ident = tool_id(message.get('tool_call_id'))
+            if ident not in pending or not isinstance(content, str) or 'tool_calls' in message:
+                raise ValueError('Unmatched tool result')
+            pending.remove(ident)
+            block = {'type': 'tool_result', 'tool_use_id': ident, 'content': content}
+            if messages[-1]['role'] == 'user':
+                messages[-1]['content'].append(block)
+            else:
+                messages.append({'role': 'user', 'content': [block]})
+            continue
+        if pending or 'tool_call_id' in message:
+            raise ValueError('Tool calls require all matching results before next turn')
+        if role in {'system', 'developer'}:
+            if messages or not isinstance(content, str) or 'tool_calls' in message:
+                raise ValueError('System messages must precede conversation')
+            system.append(content)
+        elif role in {'user', 'assistant'}:
+            calls = message.get('tool_calls')
+            if calls is None:
+                if not isinstance(content, str):
+                    raise ValueError('Text content required')
+                messages.append({'role': role, 'content': content})
+                continue
+            if role != 'assistant' or not isinstance(calls, list) or not 1 <= len(calls) <= 128:
+                raise ValueError('Invalid assistant tool calls')
+            if content is not None and not isinstance(content, str):
+                raise ValueError('Text content required')
+            blocks = [{'type': 'text', 'text': content}] if content else []
+            for call in calls:
+                if not isinstance(call, dict) or set(call) != {'id', 'type', 'function'} or call['type'] != 'function':
+                    raise ValueError('Invalid tool call')
+                ident = tool_id(call['id'])
+                if ident in seen:
+                    raise ValueError('Duplicate tool ID')
+                fn = call['function']
+                if not isinstance(fn, dict) or set(fn) != {'name', 'arguments'}:
+                    raise ValueError('Invalid tool function')
+                blocks.append({'type': 'tool_use', 'id': ident, 'name': tool_name(fn['name']), 'input': json_object(fn['arguments'])})
+                pending.add(ident)
+                seen.add(ident)
+            messages.append({'role': 'assistant', 'content': blocks})
+        else:
+            raise ValueError('Unsupported Anthropic message role')
+    if pending or not messages:
+        raise ValueError('Conversation must contain messages and resolve every tool call')
+    return system, messages
+
+
+def anthropic_content(blocks):
+    if not isinstance(blocks, list):
+        raise ValueError('Invalid Anthropic content')
+    text, calls, seen = [], [], set()
+    for block in blocks:
+        if not isinstance(block, dict):
+            raise ValueError('Invalid Anthropic block')
+        if block.get('type') == 'text' and isinstance(block.get('text'), str) and not set(block) - {'type', 'text'}:
+            text.append(block['text'])
+        elif block.get('type') == 'tool_use' and set(block) == {'type', 'id', 'name', 'input'}:
+            ident = tool_id(block['id'])
+            if ident in seen or len(calls) >= 128 or not isinstance(block['input'], dict):
+                raise ValueError('Invalid tool response')
+            seen.add(ident)
+            arguments = json.dumps(block['input'], allow_nan=False, separators=(',', ':'))
+            if len(arguments) > 1_048_576:
+                raise ValueError('Tool arguments too large')
+            calls.append({'id': ident, 'type': 'function', 'function': {'name': tool_name(block['name']), 'arguments': arguments}})
+        else:
+            raise ValueError('Unsupported Anthropic response block')
+    message = {'role': 'assistant', 'content': ''.join(text) if text or not calls else None}
+    if calls:
+        message['tool_calls'] = calls
+    return message
 
 
 def gemini_request(provider, route, payload, endpoint):
@@ -226,18 +384,18 @@ def translate_response(provider, data, model, endpoint=None, payload=None):
             if len(sizes) != 1 or (dimension is not None and sizes != {dimension}):
                 raise ValueError('Gemini embedding dimension mismatch')
         return translated
-    blocks = data.get("content", [])
-    if not isinstance(blocks, list) or any(not isinstance(item, dict) or item.get("type") != "text" or not isinstance(item.get("text"), str) for item in blocks):
-        raise ValueError("Unsupported Anthropic response content")
-    if data.get("stop_reason") not in {None, "end_turn", "stop_sequence", "max_tokens"}:
+    message = anthropic_content(data.get("content", []))
+    reason = data.get("stop_reason")
+    if reason not in {"end_turn", "stop_sequence", "max_tokens", "tool_use"}:
         raise ValueError("Unsupported Anthropic stop reason")
-    content = "".join(item["text"] for item in blocks)
+    if (reason == 'tool_use') != bool(message.get('tool_calls')) and reason != 'max_tokens':
+        raise ValueError('Tool content and stop reason mismatch')
     usage = data.get("usage")
     usage = usage if isinstance(usage, dict) else {}
     input_tokens, output_tokens = usage.get("input_tokens"), usage.get("output_tokens")
     return {"id": data.get("id", ""), "object": "chat.completion", "model": model,
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": content},
-                         "finish_reason": "length" if data.get("stop_reason") == "max_tokens" else "stop"}],
+            "choices": [{"index": 0, "message": message,
+                         "finish_reason": "length" if reason == "max_tokens" else ("tool_calls" if reason == "tool_use" else "stop")}],
             "usage": {"prompt_tokens": input_tokens, "completion_tokens": output_tokens,
                       "total_tokens": (input_tokens + output_tokens if isinstance(input_tokens, int) and isinstance(output_tokens, int) else None)}}
 
@@ -249,6 +407,11 @@ class StreamTranslator:
         self.input_tokens = None
         self.complete = False
         self.message_id = ""
+        self.anthropic_started = False
+        self.anthropic_finished = False
+        self.anthropic_blocks = {}
+        self.anthropic_ids = set()
+        self.anthropic_argument_size = 0
 
     def event(self, event):
         if not isinstance(event, dict):
@@ -282,34 +445,95 @@ class StreamTranslator:
                 result['usage'] = self.usage
             return result
         kind = event.get("type")
-        delta = {}
-        finish = None
+        if kind == 'ping':
+            return None
+        if self.complete or (self.anthropic_finished and kind != 'message_stop'):
+            raise ValueError('Anthropic content after finish')
+        delta, finish = {}, None
         if kind == "message_start":
-            message = event.get("message", {})
-            self.message_id = message.get("id", "")
-            self.input_tokens = message.get("usage", {}).get("input_tokens")
-            delta = {"role": "assistant", "content": ""}
-        elif kind == "content_block_delta":
-            content_delta = event.get("delta", {})
-            if content_delta.get("type") not in {None, "text_delta"} or not isinstance(content_delta.get("text"), str):
-                raise ValueError("Unsupported Anthropic stream content")
-            delta = {"content": content_delta["text"]}
-        elif kind == "message_delta":
-            out = event.get("usage", {}).get("output_tokens")
-            self.usage = {"prompt_tokens": self.input_tokens, "completion_tokens": out,
-                          "total_tokens": (self.input_tokens + out if isinstance(self.input_tokens, int) and isinstance(out, int) else None)}
-            finish = "length" if event.get("delta", {}).get("stop_reason") == "max_tokens" else "stop"
-        elif kind == "message_stop":
+            if self.anthropic_started:
+                raise ValueError('Duplicate message start')
+            message = event.get('message', {})
+            if not isinstance(message, dict) or message.get('content', []) != []:
+                raise ValueError('Invalid message start')
+            self.anthropic_started = True
+            self.message_id = message.get('id', '')
+            self.input_tokens = message.get('usage', {}).get('input_tokens')
+            delta = {'role': 'assistant', 'content': ''}
+        elif not self.anthropic_started:
+            raise ValueError('Anthropic stream missing message start')
+        elif kind == 'content_block_start':
+            index = event.get('index')
+            block = event.get('content_block')
+            if type(index) is not int or index != len(self.anthropic_blocks) or index >= 1024:
+                raise ValueError('Invalid content block index')
+            if any(not b['closed'] for b in self.anthropic_blocks.values()):
+                raise ValueError('Overlapping content blocks')
+            message = anthropic_content([block])
+            state = {'closed': False, 'kind': block['type']}
+            if block['type'] == 'text':
+                delta = {'content': message['content']}
+            else:
+                if block['input'] != {} or block['id'] in self.anthropic_ids or len(self.anthropic_ids) >= 128:
+                    raise ValueError('Invalid streaming tool start')
+                state.update(tool_index=len(self.anthropic_ids), arguments='')
+                self.anthropic_ids.add(block['id'])
+                call = message['tool_calls'][0]
+                call['function']['arguments'] = ''
+                delta = {'tool_calls': [{'index': state['tool_index'], **call}]}
+            self.anthropic_blocks[index] = state
+        elif kind in {'content_block_delta', 'content_block_stop'}:
+            index = event.get('index')
+            if type(index) is not int or index not in self.anthropic_blocks or self.anthropic_blocks[index]['closed']:
+                raise ValueError('Unknown or closed content block')
+            state = self.anthropic_blocks[index]
+            if kind == 'content_block_stop':
+                state['closed'] = True
+                if state['kind'] == 'tool_use':
+                    if state['arguments']:
+                        json_object(state['arguments'])
+                    else:
+                        delta = {'tool_calls': [{'index': state['tool_index'], 'function': {'arguments': '{}'}}]}
+                if not delta:
+                    return None
+            else:
+                part = event.get('delta', {})
+                if not isinstance(part, dict):
+                    raise ValueError('Invalid content delta')
+                if state['kind'] == 'text' and set(part) == {'type', 'text'} and part['type'] == 'text_delta' and isinstance(part['text'], str):
+                    delta = {'content': part['text']}
+                elif state['kind'] == 'tool_use' and set(part) == {'type', 'partial_json'} and part['type'] == 'input_json_delta' and isinstance(part['partial_json'], str):
+                    self.anthropic_argument_size += len(part['partial_json'])
+                    if self.anthropic_argument_size > 1_048_576:
+                        raise ValueError('Tool arguments too large')
+                    state['arguments'] += part['partial_json']
+                    delta = {'tool_calls': [{'index': state['tool_index'], 'function': {'arguments': part['partial_json']}}]}
+                else:
+                    raise ValueError('Unsupported Anthropic stream content')
+        elif kind == 'message_delta':
+            if any(not b['closed'] for b in self.anthropic_blocks.values()):
+                raise ValueError('Unclosed content block')
+            reason = event.get('delta', {}).get('stop_reason')
+            if reason not in {'end_turn', 'stop_sequence', 'max_tokens', 'tool_use'}:
+                raise ValueError('Unsupported Anthropic stop reason')
+            if (reason == 'tool_use') != bool(self.anthropic_ids) and reason != 'max_tokens':
+                raise ValueError('Tool content and stop reason mismatch')
+            out = event.get('usage', {}).get('output_tokens')
+            self.usage = {'prompt_tokens': self.input_tokens, 'completion_tokens': out,
+                          'total_tokens': (self.input_tokens + out if isinstance(self.input_tokens, int) and isinstance(out, int) else None)}
+            finish = 'length' if reason == 'max_tokens' else ('tool_calls' if reason == 'tool_use' else 'stop')
+            self.anthropic_finished = True
+        elif kind == 'message_stop':
+            if not self.anthropic_finished:
+                raise ValueError('Anthropic stream missing finish reason')
             self.complete = True
             return None
-        elif kind == "error":
-            raise ValueError("Provider stream failed")
         else:
-            return None
-        result = {"id": self.message_id, "object": "chat.completion.chunk", "model": self.model,
-                  "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+            raise ValueError('Unsupported Anthropic stream event')
+        result = {'id': self.message_id, 'object': 'chat.completion.chunk', 'model': self.model,
+                  'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}]}
         if self.usage:
-            result["usage"] = self.usage
+            result['usage'] = self.usage
         return result
 
     async def iterate(self, response):
@@ -322,12 +546,12 @@ class StreamTranslator:
                     data = "\n".join(lines)
                     lines, size = [], 0
                     if data == "[DONE]":
-                        if self.provider.kind == "gemini" and not self.complete:
-                            raise ValueError("Gemini stream missing finish reason")
+                        if self.provider.kind in {"gemini", "anthropic"} and not self.complete:
+                            raise ValueError("Native provider stream missing completion")
                         self.complete = True
                         yield b"data: [DONE]\n\n"
                         return
-                    event = self.event(json.loads(data))
+                    event = self.event(json_object(data))
                     if event is not None:
                         yield ("data: " + json.dumps(event) + "\n\n").encode()
                 continue
@@ -340,11 +564,11 @@ class StreamTranslator:
         if lines:
             data = "\n".join(lines)
             if data == "[DONE]":
-                if self.provider.kind == "gemini" and not self.complete:
-                    raise ValueError("Gemini stream missing finish reason")
+                if self.provider.kind in {"gemini", "anthropic"} and not self.complete:
+                    raise ValueError("Native provider stream missing completion")
                 self.complete = True
             else:
-                event = self.event(json.loads(data))
+                event = self.event(json_object(data))
                 if event is not None:
                     yield ("data: " + json.dumps(event) + "\n\n").encode()
         if not self.complete:

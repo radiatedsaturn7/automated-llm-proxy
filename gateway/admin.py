@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from . import db, schemas
 from .config import get_settings
-from .security import Identity, admin, encrypt, new_key
+from .security import Identity, admin, encrypt, new_key, revalidate_admin
 
 router = APIRouter()
 
@@ -63,6 +63,7 @@ async def list_resource(resource: str, identity: Identity = Depends(admin),
 @router.post("/admin/api/teams", status_code=201)
 async def create_team(body: schemas.TeamCreate, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         team = db.Team(name=body.name, budget_micros=micros(body.budget_usd))
         s.add(team)
         await s.flush()
@@ -73,6 +74,7 @@ async def create_team(body: schemas.TeamCreate, identity: Identity = Depends(adm
 @router.patch("/admin/api/teams/{team_id}")
 async def patch_team(team_id: str, body: schemas.TeamPatch, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         team = await s.get(db.Team, team_id)
         if not team:
             raise HTTPException(404, "Team not found")
@@ -87,6 +89,7 @@ async def patch_team(team_id: str, body: schemas.TeamPatch, identity: Identity =
 @router.post("/admin/api/users", status_code=201)
 async def create_user(body: schemas.UserCreate, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         if body.team_id and not await s.get(db.Team, body.team_id):
             raise HTTPException(404, "Team not found")
         user = db.User(email=body.email, team_id=body.team_id, role=body.role, budget_micros=micros(body.budget_usd))
@@ -99,6 +102,7 @@ async def create_user(body: schemas.UserCreate, identity: Identity = Depends(adm
 @router.patch("/admin/api/users/{user_id}")
 async def patch_user(user_id: str, body: schemas.UserPatch, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         user = await s.get(db.User, user_id)
         if not user:
             raise HTTPException(404, "User not found")
@@ -119,6 +123,7 @@ async def create_provider(body: schemas.ProviderCreate, identity: Identity = Dep
     from .providers import validate_base_url
     await validate_base_url(body.base_url)
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         provider = db.Provider(name=body.name, kind=body.kind, base_url=body.base_url.rstrip("/"),
                                encrypted_key=encrypt(body.api_key), models=body.model_dump(mode="json")["models"],
                                enabled=body.enabled, priority=body.priority)
@@ -131,6 +136,7 @@ async def create_provider(body: schemas.ProviderCreate, identity: Identity = Dep
 @router.patch("/admin/api/providers/{provider_id}")
 async def patch_provider(provider_id: str, body: schemas.ProviderPatch, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         provider = await s.get(db.Provider, provider_id)
         if not provider:
             raise HTTPException(404, "Provider not found")
@@ -153,6 +159,7 @@ async def patch_provider(provider_id: str, body: schemas.ProviderPatch, identity
 @router.post("/admin/api/keys", status_code=201)
 async def create_key(body: schemas.KeyCreate, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         user = await s.get(db.User, body.user_id)
         if not user or not user.enabled:
             raise HTTPException(404, "Active user not found")
@@ -170,6 +177,7 @@ async def create_key(body: schemas.KeyCreate, identity: Identity = Depends(admin
 @router.post("/admin/api/keys/{key_id}/revoke")
 async def revoke_key(key_id: str, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         key = await s.get(db.APIKey, key_id)
         if not key:
             raise HTTPException(404, "Key not found")
@@ -181,6 +189,7 @@ async def revoke_key(key_id: str, identity: Identity = Depends(admin)):
 @router.post("/admin/api/keys/{key_id}/rotate")
 async def rotate_key(key_id: str, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         key = await s.get(db.APIKey, key_id)
         if not key or key.revoked:
             raise HTTPException(404, "Active key not found")
@@ -207,6 +216,7 @@ async def evaluate_prompt(body: schemas.EvaluationRequest, identity: Identity = 
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         await db.audit(s, identity.user.id, "evaluation.run", cases=len(body.cases), rules=body.rules)
     return result
 
@@ -217,6 +227,7 @@ async def reconcile(reservation_id: str, body: dict, identity: Identity = Depend
     if body != {"release": True, "provider_billing_checked": True}:
         raise HTTPException(400, "Explicit release and provider_billing_checked required")
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         reservation = await s.get(db.Reservation, reservation_id)
         if not reservation or reservation.status != "pending":
             raise HTTPException(409, "No pending reservation")
@@ -236,6 +247,7 @@ async def link_identity(user_id: str, body: schemas.IdentityLink, identity: Iden
         raise HTTPException(400, "Combined identity identifier is too long")
     from sqlalchemy import delete
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         user = await s.get(db.User, user_id)
         if not user:
             raise HTTPException(404, "User not found")
@@ -256,6 +268,7 @@ async def link_identity(user_id: str, body: schemas.IdentityLink, identity: Iden
 async def revoke_user_sessions(user_id: str, body: schemas.SessionRevocation, identity: Identity = Depends(admin)):
     from sqlalchemy import delete
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         if not await s.get(db.User, user_id):
             raise HTTPException(404, "User not found")
         result = await s.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user_id))
@@ -268,6 +281,7 @@ async def revoke_user_sessions(user_id: str, body: schemas.SessionRevocation, id
 async def revoke_all_sessions(body: schemas.SessionRevocation, identity: Identity = Depends(admin)):
     from sqlalchemy import delete
     async with db.transaction() as s:
+        await revalidate_admin(s, identity)
         result = await s.execute(delete(db.BrowserSession))
         count = result.rowcount
         await db.audit(s, identity.user.id, "sessions.revoke_all", count=count)
@@ -288,6 +302,7 @@ async def get_provider_health(provider_id: str, identity: Identity = Depends(adm
 async def reset_provider_health(provider_id: str, identity: Identity = Depends(admin)):
     from .provider_health import reset
     async with db.transaction() as session:
+        await revalidate_admin(session, identity)
         if await session.get(db.Provider, provider_id) is None:
             raise HTTPException(404, "Provider not found")
         await reset(session, provider_id)

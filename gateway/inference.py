@@ -1,7 +1,7 @@
 import asyncio
 import json
-import logging
 import math
+import logging
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from . import db, guardrails, policy, provider_health
 from .config import get_settings
-from .providers import StreamTranslator, response_headers, translate_response, upstream_request
+from .providers import StreamTranslator, response_headers as provider_response_headers, translate_response, upstream_request
 from .security import inference_identity
 
 router = APIRouter()
@@ -136,12 +136,47 @@ async def finish_request(request, response, reservation_id, model, provider, rou
         pass
 
 
+def provider_json(raw):
+    """Reject ambiguous or non-finite provider JSON before normalization."""
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("Duplicate provider JSON key")
+            result[key] = value
+        return result
+
+    def number(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError("Non-finite provider JSON number")
+        return parsed
+
+    def invalid(value):
+        raise ValueError("Invalid provider JSON constant")
+
+    return json.loads(raw, object_pairs_hook=pairs, parse_float=number, parse_constant=invalid)
+
+
+def response_headers(response, request_id):
+    headers = provider_response_headers(response, request_id)
+    # Correlation IDs originate upstream and can carry uninspected content too.
+    if get_settings().guardrails_output_enabled:
+        headers.pop("X-Provider-Request-ID", None)
+    return headers
+
+
 async def infer(request, endpoint):
     identity = await inference_identity(request)
     try:
         payload = validate_payload(await request.json(), endpoint)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(400, "Invalid JSON") from exc
+    if get_settings().guardrails_output_enabled and payload.get("stream"):
+        raise HTTPException(400, "Streaming is unavailable with output guardrails enabled")
+    if (get_settings().guardrails_output_enabled and endpoint == "embeddings"
+            and payload.get("encoding_format", "float") != "float"):
+        raise HTTPException(400, "Output guardrails require float embeddings")
     model = payload["model"]
     if identity.key.allowed_models and model not in identity.key.allowed_models:
         raise HTTPException(403, "Model not allowed")
@@ -212,12 +247,26 @@ async def infer(request, endpoint):
                 raise ValueError("Provider response exceeded size limit")
             chunks.append(chunk)
         await response.aclose()
-        data = json.loads(b"".join(chunks))
+        data = provider_json(b"".join(chunks))
         if not isinstance(data, dict):
             raise ValueError("Provider response not an object")
         data = translate_response(provider, data, model, endpoint=endpoint, payload=payload)
         await finish_request(request, response, reservation_id, model, provider, route, data.get("usage"),
                              health_ticket=health_ticket, outcome='success')
+        try:
+            guarded_output = guardrails.postflight(data, get_settings(), endpoint="embeddings" if endpoint == "embeddings" else "chat")
+        except guardrails.GuardrailRejected as rejected:
+            async with db.transaction(inference=True) as session:
+                await db.audit(session, identity.user.id, "guardrail.output_block",
+                               reason=rejected.reason, detector_counts=rejected.counts)
+            REQUESTS.labels(endpoint, "output_blocked").inc()
+            raise HTTPException(403, "Output rejected by gateway policy",
+                                headers=response_headers(response, reservation_id)) from None
+        data = guarded_output.payload
+        if guarded_output.counts:
+            async with db.transaction(inference=True) as session:
+                await db.audit(session, identity.user.id, "guardrail.output_redact",
+                               detector_counts=guarded_output.counts)
         REQUESTS.labels(endpoint, "success").inc()
         return JSONResponse(data, headers=response_headers(response, reservation_id))
     except HTTPException:
@@ -225,7 +274,7 @@ async def infer(request, endpoint):
     except asyncio.CancelledError:
         await finish_request(request, response, reservation_id, model, provider, route)
         raise
-    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError, RecursionError):
         await finish_request(request, response, reservation_id, model, provider, route,
                              health_ticket=health_ticket, outcome='failure')
         REQUESTS.labels(endpoint, "error").inc()

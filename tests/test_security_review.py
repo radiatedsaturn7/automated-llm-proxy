@@ -12,7 +12,7 @@ from gateway.providers import StreamTranslator, translate_response
 
 @pytest.mark.parametrize("usage", [None, {}, {"input_tokens": 12}])
 def test_anthropic_missing_usage_not_fabricated_as_free(usage):
-    result = translate_response(SimpleNamespace(kind="anthropic"), {"content": [], "usage": usage}, "chat")
+    result = translate_response(SimpleNamespace(kind="anthropic"), {"content": [], "usage": usage, "stop_reason": "end_turn"}, "chat")
     assert result["usage"]["completion_tokens"] is None
 
 

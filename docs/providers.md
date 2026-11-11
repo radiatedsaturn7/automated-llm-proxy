@@ -122,3 +122,24 @@ The watchdog does not cancel the client's transport task. Ingress/server write
 timeouts remain necessary to bound downstream network lifetime. Shutdown drains
 retained watchdog/accounting tasks; a wholly unconsumed response can keep draining
 until its configured deadline. Configure termination grace periods accordingly.
+
+## Bounded nonstream responses and encoding
+
+`PROVIDER_RESPONSE_DURATION_SECONDS=300` sets a finite absolute deadline for
+nonstream inference, from upstream dispatch through response headers and the entire
+body (range 1–3600 seconds). Body chunks do not reset it. The existing 16 MiB body
+cap and separate `PROVIDER_TIMEOUT_SECONDS` connect/read-inactivity timeout also
+apply. Reaching the deadline, including during a continuous slow trickle, returns
+a generic 502, closes upstream, records provider failure, and settles conservative
+usage once. Client cancellation preserves conservative accounting without declaring
+a provider failure. This is a response-receipt deadline, not a database settlement
+or downstream write deadline. Configure it consistently across replicas and allow
+sufficient time for your chosen models.
+
+All inference adapters request `Accept-Encoding: identity`. Successful upstream
+responses must omit `Content-Encoding` or specify only `identity` (case-insensitive).
+Compressed, stacked, duplicate or empty encoding values are rejected before any
+body read, including streams; no decompressor is allowed to expand a response ahead
+of the body-size check. Providers/reverse proxies that force compression must be
+configured to honor identity encoding. Error-status response bodies are never read.
+Tests use synthetic upstream responses, not paid/live provider calls.

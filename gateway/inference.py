@@ -225,16 +225,20 @@ async def infer(request, endpoint):
     client = request.app.state.upstream
     response = None
     cfg = get_settings()
-    stream_deadline = time.monotonic() + cfg.provider_stream_duration_seconds if payload.get("stream") else None
+    deadline = time.monotonic() + (cfg.provider_stream_duration_seconds if payload.get("stream")
+                                   else cfg.provider_response_duration_seconds)
+    stream_deadline = deadline if payload.get("stream") else None
+    # Reject compression rather than decompressing attacker-controlled expansion
+    # before the decoded-byte cap can inspect it. Applies to every provider kind.
+    headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
+    headers["Accept-Encoding"] = "identity"
     try:
         with LATENCY.labels(endpoint).time():
-            if stream_deadline is not None:
-                # Include waiting for response headers in the absolute deadline.
-                response = await asyncio.wait_for(
-                    client.send(client.build_request("POST", url, headers=headers, json=body), stream=True),
-                    timeout=max(0, stream_deadline - time.monotonic()))
-            else:
-                response = await client.send(client.build_request("POST", url, headers=headers, json=body), stream=True)
+            response = await asyncio.wait_for(
+                client.send(client.build_request("POST", url, headers=headers, json=body), stream=True),
+                timeout=max(0, deadline - time.monotonic()))
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Provider response duration exceeded")
         if response.status_code >= 300:
             # Provider may have processed 5xx responses; keep conservative charge. Definitive 4xx release.
             await finish_request(request, response, reservation_id, model, provider, route,
@@ -244,6 +248,8 @@ async def infer(request, endpoint):
             REQUESTS.labels(endpoint, "upstream_error").inc()
             raise HTTPException(429 if response.status_code == 429 else 502, "Provider rejected request",
                                 headers=response_headers(response, reservation_id))
+        if response.headers.get("content-encoding", "identity").strip().lower() != "identity":
+            raise ValueError("Unsupported provider content encoding")
         if payload.get("stream"):
             translator = StreamTranslator(provider, model, max_bytes=cfg.provider_stream_max_bytes,
                                           max_events=cfg.provider_stream_max_events,
@@ -330,7 +336,19 @@ async def infer(request, endpoint):
                 **response_headers(response, reservation_id), "X-Accel-Buffering": "no"})
         chunks = []
         size = 0
-        async for chunk in response.aiter_bytes():
+        iterator = response.aiter_bytes().__aiter__()
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Provider response duration exceeded")
+            try:
+                chunk = await asyncio.wait_for(anext(iterator), timeout=remaining)
+            except StopAsyncIteration:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Provider response duration exceeded")
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Provider response duration exceeded")
             size += len(chunk)
             if size > 16_777_216:
                 raise ValueError("Provider response exceeded size limit")

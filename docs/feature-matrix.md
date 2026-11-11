@@ -40,3 +40,7 @@ Reviewed official sources on 2026-11-11. These are capability references, not cl
 6. **Optional optimization:** tenant-isolated caching with privacy policy, batching, weighted routing and multimodal/vendor-specific endpoints. Cache semantics and data isolation must precede cache hit-rate claims.
 
 See [architecture](architecture.md), [security](security.md), [evaluation](evaluation.md) and [relay](local-relay.md) for operational details and exclusions.
+
+### Identity administration increment
+
+Explicit administrator-verified OIDC identity linking and per-user/all-browser-session revocation are implemented and audited. Identity linking never guesses from matching email and does not replace existing links. These controls are not SCIM, IdP-session revocation or automatic group-change reconciliation. Provider model-map updates now use the same size and alias validation as provider creation.

@@ -158,6 +158,14 @@
           toggle.type = "button";
           toggle.addEventListener("click", () => updateResource(resource, row.id, { enabled: row.enabled === false }, toggle));
           td.append(toggle);
+          if (resource === "users") {
+            const sessions = node("button", "Revoke sessions", "danger"); sessions.type = "button";
+            sessions.addEventListener("click", () => sessionAction(row.id, sessions)); td.append(sessions);
+            if (!row.identity_linked) {
+              const link = node("button", "Link SSO identity"); link.type = "button";
+              link.addEventListener("click", () => identityAction(row, link)); td.append(link);
+            }
+          }
           if (["teams", "users"].includes(resource)) {
             const budget = node("button", "Set budget"); budget.type = "button";
             budget.addEventListener("click", () => {
@@ -176,6 +184,32 @@
     });
     table.append(body); container.append(table);
   }
+  async function sessionAction(userId, button) {
+    const scope = userId ? `user ${userId}` : "EVERY user, including yourself";
+    if (!window.confirm(`Revoke all browser sessions for ${scope}? This does not revoke API keys or prevent a new SSO login.`)) return;
+    button.disabled = true; clearError();
+    try {
+      const path = userId ? `/admin/api/users/${encodeURIComponent(userId)}/sessions/revoke` : "/admin/api/sessions/revoke-all";
+      const result = await api(path, { method: "POST", body: { confirm: true } });
+      message(`Revoked ${result.revoked_sessions} browser sessions. API keys are unchanged.`);
+    } catch (error) { showError(error); }
+    finally { button.disabled = false; }
+  }
+  async function identityAction(row, button) {
+    const issuer = window.prompt("Exact configured OIDC issuer URL. Verify the identity in your trusted IdP administration console, not by email matching.");
+    if (issuer === null) return;
+    const subject = window.prompt(`Exact IdP subject (sub) to link to ${row.email || row.id}. This grants that identity access to this account; SSO group mapping determines role/team.`);
+    if (subject === null) return;
+    if (!window.confirm(`I verified this identity with the trusted IdP. Link issuer ${issuer} and subject ${subject} to ${row.email || row.id}? Existing browser sessions for this user will be revoked.`)) return;
+    button.disabled = true; clearError();
+    try {
+      await api(`/admin/api/users/${encodeURIComponent(row.id)}/identity`, { method: "POST", body: { issuer, subject, identity_verified: true } });
+      message("Identity linked. API keys are unchanged. SSO still requires an authorized group.");
+      await loadView();
+    } catch (error) { showError(error); }
+    finally { button.disabled = false; }
+  }
+  $("revoke-all-sessions").addEventListener("click", (event) => sessionAction(null, event.currentTarget));
   function renderEditor() {
     const resourceFields = fields[state.view];
     $("editor").hidden = !resourceFields;

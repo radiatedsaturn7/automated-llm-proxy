@@ -6,7 +6,7 @@ from cryptography.fernet import Fernet
 from gateway import db
 from gateway.config import get_settings
 from gateway.main import app
-from gateway.migrate import migrate
+from gateway.migrate import migrate, version_metadata
 
 
 @pytest.fixture
@@ -28,6 +28,7 @@ async def client(tmp_path, monkeypatch):
     if os.environ.get("TEST_DATABASE_URL"):
         async with db.engine.begin() as connection:
             await connection.run_sync(db.Base.metadata.drop_all)
+            await connection.run_sync(version_metadata.drop_all)
     await migrate()
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost:8080") as c:

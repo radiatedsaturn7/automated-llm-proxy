@@ -18,6 +18,8 @@ def micros(value):
 def record(item):
     hidden = {"digest", "encrypted_key", "oidc_subject"}
     data = {column.name: getattr(item, column.name) for column in item.__table__.columns if column.name not in hidden}
+    if isinstance(item, db.User):
+        data["identity_linked"] = bool(item.oidc_subject)
     if "budget_micros" in data:
         data["budget_usd"] = None if data["budget_micros"] is None else data["budget_micros"] / 1_000_000
     return data
@@ -216,3 +218,52 @@ async def reconcile(reservation_id: str, body: dict, identity: Identity = Depend
         reservation.status = "released"
         await db.audit(s, identity.user.id, "reservation.release", reservation.id)
     return {"released": True}
+
+
+@router.post("/admin/api/users/{user_id}/identity")
+async def link_identity(user_id: str, body: schemas.IdentityLink, identity: Identity = Depends(admin)):
+    """Bind a verified IdP subject explicitly; never infer identity from an email."""
+    cfg = get_settings()
+    if not cfg.oidc_issuer or body.issuer != cfg.oidc_issuer:
+        raise HTTPException(400, "Issuer must exactly match the configured OIDC issuer")
+    subject = body.issuer + "|" + body.subject
+    if len(subject) > 512:
+        raise HTTPException(400, "Combined identity identifier is too long")
+    from sqlalchemy import delete
+    async with db.transaction() as s:
+        user = await s.get(db.User, user_id)
+        if not user:
+            raise HTTPException(404, "User not found")
+        if user.oidc_subject and user.oidc_subject != subject:
+            raise HTTPException(409, "User already has a different linked identity")
+        owner = await s.scalar(select(db.User).where(db.User.oidc_subject == subject))
+        if owner and owner.id != user_id:
+            raise HTTPException(409, "Identity already linked to another user")
+        changed = user.oidc_subject != subject
+        user.oidc_subject = subject
+        if changed:
+            await s.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user_id))
+        await db.audit(s, identity.user.id, "user.identity.link", user_id, changed=changed)
+    return {"user_id": user_id, "identity_linked": True, "changed": changed}
+
+
+@router.post("/admin/api/users/{user_id}/sessions/revoke")
+async def revoke_user_sessions(user_id: str, body: schemas.SessionRevocation, identity: Identity = Depends(admin)):
+    from sqlalchemy import delete
+    async with db.transaction() as s:
+        if not await s.get(db.User, user_id):
+            raise HTTPException(404, "User not found")
+        result = await s.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user_id))
+        count = result.rowcount
+        await db.audit(s, identity.user.id, "user.sessions.revoke", user_id, count=count)
+    return {"revoked_sessions": count}
+
+
+@router.post("/admin/api/sessions/revoke-all")
+async def revoke_all_sessions(body: schemas.SessionRevocation, identity: Identity = Depends(admin)):
+    from sqlalchemy import delete
+    async with db.transaction() as s:
+        result = await s.execute(delete(db.BrowserSession))
+        count = result.rowcount
+        await db.audit(s, identity.user.id, "sessions.revoke_all", count=count)
+    return {"revoked_sessions": count}

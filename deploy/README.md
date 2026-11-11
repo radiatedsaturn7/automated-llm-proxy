@@ -176,3 +176,35 @@ committed after your organization verifies the selected provider checksums.
 - Helm hooks: https://helm.sh/docs/topics/charts_hooks/
 - PostgreSQL backup/recovery: https://www.postgresql.org/docs/current/backup.html
 - Terraform Helm provider: https://registry.terraform.io/providers/hashicorp/helm/latest/docs
+
+## Full-stack browser smoke test
+
+The `compose-browser` CI job builds the real container, starts PostgreSQL, runs the
+migration container, waits for readiness, and uses Chromium/Playwright against
+the served admin UI. It bootstraps a disposable installation, logs in, creates a
+team, user and scoped API key, rotates/revokes that key, checks member/admin access
+separation, lists models, runs an offline evaluation, checks audit records, and
+signs out. No provider is configured and no paid inference request is made. This
+complements adapter/streaming mock tests; it does not test a real identity provider,
+external model service, browser SSO, load, or Kubernetes failover.
+
+To run locally, use a **fresh disposable database**, start Compose using the setup
+above, and export the same `BOOTSTRAP_TOKEN` into the test process:
+
+```sh
+npm ci --prefix tests/browser
+(cd tests/browser && npx playwright install --with-deps chromium)
+BOOTSTRAP_TOKEN="your-disposable-bootstrap-token" npm test --prefix tests/browser
+```
+
+Optional `GATEWAY_TEST_URL` selects a different test server. `CHROMIUM_PATH` can
+select an installed Chromium executable. Do not target a production or previously
+bootstrapped instance: the test intentionally creates durable records and bootstrap
+must succeed exactly once. Retries are disabled because repeating against a dirty
+database would hide installation failures. CI tears down its volumes afterward;
+do not copy that destructive cleanup step onto a real installation.
+
+Browser traces, videos and screenshots are disabled to avoid preserving one-time
+administrator credentials. Test secrets are generated per run, masked in CI, and
+never committed. The application image's nonroot/read-only settings remain enabled
+throughout this test. A passing smoke test is not a production-readiness guarantee.

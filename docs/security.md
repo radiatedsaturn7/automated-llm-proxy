@@ -36,3 +36,9 @@ Default audit/usage records should contain metadata, not prompt or response bodi
 - Define incident response, credential revocation, audit retention and upgrade/rollback procedures.
 
 Report vulnerabilities privately to repository maintainers using GitHub private vulnerability reporting if enabled. Do not post live secrets or exploitable production details in a public issue.
+
+## Explicit identity linking and session response
+
+An administrator can link a pre-provisioned user using `POST /admin/api/users/{id}/identity` with `issuer`, `subject` and `identity_verified: true`. Obtain the subject from the trusted IdP administration console, not an email or unverified user claim. The issuer must exactly match this deployment's OIDC issuer. Linking is audited, rejects subjects belonging to another user and rejects replacement of an existing different link. It revokes that user's existing browser sessions on first linking; keys are unchanged. No automatic email-based linking occurs. SSO still requires an authorized group and its mapping determines role and team at login.
+
+`POST /admin/api/users/{id}/sessions/revoke` revokes one user's browser sessions; `POST /admin/api/sessions/revoke-all` revokes everyone's, including the caller's cookie session. Both require administrator authorization and JSON `{"confirm":true}` and create audit events. They do not revoke API/agent keys, prevent new IdP login, or end IdP sessions. Disable the user and separately revoke credentials for account containment. The admin panel exposes these actions with explicit confirmations. After revoking your own browser session, sign in again before further administration.

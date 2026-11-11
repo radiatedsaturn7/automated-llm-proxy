@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Integer, MetaData, Table, inspect, select, text
 
 from . import db
-from .migrations import HEAD, REVISIONS, v0001, v0002, v0003, v0004, v0005, v0006
+from .migrations import HEAD, REVISIONS, v0001, v0002, v0003, v0004, v0005, v0006, v0007
 
 version_metadata = MetaData()
 versions = Table("gateway_schema_versions", version_metadata,
@@ -45,7 +45,7 @@ def validate_v1(connection):
 
 
 def validate_head(connection):
-    validate_schema(connection, v0006.metadata)
+    validate_schema(connection, v0007.metadata)
 
 
 def validate_schema(connection, expected):
@@ -105,7 +105,7 @@ def _upgrade(connection, adopt_v1=False):
     if not applied and set(inspect(connection).get_table_names()) != {versions.name}:
         raise MigrationError("Schema exists without revision history; refusing partial initialization")
     if applied:
-        validate_schema(connection, {1: v0001.Base.metadata, 2: v0002.metadata, 3: v0003.metadata, 4: v0004.metadata, 5: v0005.metadata, 6: v0006.metadata}[applied[-1]])
+        validate_schema(connection, {1: v0001.Base.metadata, 2: v0002.metadata, 3: v0003.metadata, 4: v0004.metadata, 5: v0005.metadata, 6: v0006.metadata, 7: v0007.metadata}[applied[-1]])
     for number, revision in REVISIONS:
         if number not in applied:
             revision.upgrade(connection)
@@ -122,6 +122,12 @@ async def migrate(adopt_v1=False):
     async with db.engine.connect() as conn:
         async with conn.begin():
             if db.engine.dialect.name == "postgresql":
+                # Transaction-local override also handles callers reusing a runtime engine.
+                settings = db.get_settings()
+                await conn.execute(text("SELECT set_config('statement_timeout', :value, true)"),
+                                   {"value": str(settings.db_migration_statement_timeout_ms)})
+                await conn.execute(text("SELECT set_config('lock_timeout', :value, true)"),
+                                   {"value": str(settings.db_migration_lock_timeout_ms)})
                 await conn.exec_driver_sql("SELECT pg_advisory_xact_lock(91827364)")
             elif db.engine.dialect.name == "sqlite":
                 await conn.exec_driver_sql("BEGIN IMMEDIATE")

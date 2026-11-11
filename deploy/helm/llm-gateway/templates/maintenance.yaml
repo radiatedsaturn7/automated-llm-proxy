@@ -1,0 +1,53 @@
+{{- if .Values.maintenance.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "gateway.fullname" . | trunc 42 | trimSuffix "-" }}-cleanup
+spec:
+  schedule: {{ .Values.maintenance.schedule | quote }}
+  timeZone: Etc/UTC
+  suspend: {{ .Values.maintenance.suspend }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.maintenance.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.maintenance.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.maintenance.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.maintenance.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.maintenance.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ .Values.maintenance.ttlSecondsAfterFinished }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "gateway.name" . }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/component: maintenance
+        spec:
+          serviceAccountName: {{ include "gateway.serviceAccountName" . }}
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: cleanup
+              image: {{ include "gateway.image" . | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: [python, -m, gateway.maintenance, --apply, --batch-size, {{ .Values.maintenance.batchSize | quote }}]
+              {{- include "gateway.env" . | nindent 14 }}
+              resources: {{- toYaml .Values.maintenance.resources | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              volumeMounts:
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - name: tmp
+              emptyDir: {sizeLimit: 64Mi}
+{{- end }}

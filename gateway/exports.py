@@ -6,7 +6,7 @@ import hmac
 import json
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select, tuple_
 from . import db
 from .admin import record
 from .config import get_settings
@@ -88,7 +88,7 @@ async def export(
     if position:
         after = timestamp(position["after_time"])
         query = query.where(
-            or_(model.created_at > after, and_(model.created_at == after, model.id > position["after_id"]))
+            tuple_(model.created_at, model.id) > tuple_(after, position["after_id"])
         )
     async with db.session_factory() as session:
         values = list(

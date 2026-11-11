@@ -10,6 +10,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", extra="ignore")
     database_url: str = "sqlite+aiosqlite:///./gateway.db"
+    db_pool_size: int = Field(default=10, ge=1, le=200)
+    db_max_overflow: int = Field(default=20, ge=0, le=200)
+    db_pool_timeout_seconds: float = Field(default=30, ge=0.1, le=120)
+    db_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
+    db_statement_timeout_ms: int = Field(default=30000, ge=100, le=600000)
+    db_lock_timeout_ms: int = Field(default=5000, ge=100, le=600000)
+    db_migration_statement_timeout_ms: int = Field(default=0, ge=0, le=86400000)
+    db_migration_lock_timeout_ms: int = Field(default=0, ge=0, le=86400000)
     gateway_master_key: str
     gateway_signing_key: str = Field(min_length=32)
     bootstrap_token: str = Field(min_length=32)
@@ -36,6 +44,8 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_secrets(self):
         Fernet(self.gateway_master_key.encode())
+        if self.db_lock_timeout_ms > self.db_statement_timeout_ms:
+            raise ValueError("DB_LOCK_TIMEOUT_MS must not exceed DB_STATEMENT_TIMEOUT_MS")
         if not self.oidc_group_claim or len(self.oidc_group_claim) > 256 or any(not part for part in self.oidc_group_claim.split(".")):
             raise ValueError("OIDC_GROUP_CLAIM must be a nonempty dot-separated object path")
         origins = json.loads(self.oidc_trusted_endpoint_origins)

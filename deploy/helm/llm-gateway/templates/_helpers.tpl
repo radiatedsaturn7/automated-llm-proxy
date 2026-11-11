@@ -52,6 +52,22 @@ env:
     value: {{ .Values.circuitBreaker.cooldownSeconds | quote }}
   - name: CIRCUIT_PROBE_SECONDS
     value: {{ .Values.circuitBreaker.probeSeconds | quote }}
+  - name: DB_POOL_SIZE
+    value: {{ .Values.database.poolSize | quote }}
+  - name: DB_MAX_OVERFLOW
+    value: {{ .Values.database.maxOverflow | quote }}
+  - name: DB_POOL_TIMEOUT_SECONDS
+    value: {{ .Values.database.poolTimeoutSeconds | quote }}
+  - name: DB_POOL_RECYCLE_SECONDS
+    value: {{ .Values.database.poolRecycleSeconds | quote }}
+  - name: DB_STATEMENT_TIMEOUT_MS
+    value: {{ .Values.database.statementTimeoutMs | quote }}
+  - name: DB_LOCK_TIMEOUT_MS
+    value: {{ .Values.database.lockTimeoutMs | quote }}
+  - name: DB_MIGRATION_STATEMENT_TIMEOUT_MS
+    value: {{ .Values.database.migrationStatementTimeoutMs | quote }}
+  - name: DB_MIGRATION_LOCK_TIMEOUT_MS
+    value: {{ .Values.database.migrationLockTimeoutMs | quote }}
 {{- with .Values.extraEnv }}
   {{- toYaml . | nindent 2 }}
 {{- end }}

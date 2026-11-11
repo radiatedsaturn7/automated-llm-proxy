@@ -106,3 +106,12 @@ records or accounting. Creation is transactional, **not concurrent/online**; pla
 a maintenance window and disk capacity for large tables. See
 [database-indexes.md](database-indexes.md) for rationale, remaining query limits,
 and PostgreSQL plan verification.
+
+## Revision 8: explicit secondary memberships
+
+Revision 8 creates `team_memberships` with a composite user/team identity and
+member/admin role. Existing primary memberships, user roles and credentials remain
+unchanged; no delegated administrator authority is backfilled. Keys may select an
+active explicit secondary membership after upgrade. SCIM/OIDC continue to manage
+the primary relationship. See [team-delegation.md](team-delegation.md) before rollout,
+particularly removal/revocation and independent secondary reconciliation rules.

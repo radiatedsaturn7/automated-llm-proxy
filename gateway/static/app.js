@@ -21,12 +21,12 @@
     users: [
       { name: "email", label: "Email", type: "email", required: true },
       { name: "team_id", label: "Team ID (optional)", help: "For keys, this must match the selected user’s current team." },
-      { name: "role", label: "Role", options: ["member", "admin"], value: "member", help: "Member: own access only. Administrator: privileged organization management. API key permissions further restrict either role; they never grant a user a higher role." },
+      { name: "role", label: "Role", options: ["member", "admin"], value: "member", help: "Member: own access plus explicitly delegated team roles. Administrator: privileged organization management. API key permissions further restrict either role; they never grant a user a higher role." },
       { name: "budget_usd", label: "Monthly budget (USD)", type: "number", min: "0", step: "0.01", required: true, value: "25" }
     ],
     providers: [
       { name: "name", label: "Provider name", required: true },
-      { name: "kind", label: "Adapter", options: ["openai", "anthropic", "azure_openai"], value: "openai" },
+      { name: "kind", label: "Adapter", options: ["openai", "anthropic", "azure_openai", "gemini"], value: "openai" },
       { name: "base_url", label: "Trusted provider base URL", type: "url", required: true, value: "https://api.openai.com/v1" },
       { name: "api_key", label: "Provider API key", type: "password", required: true, help: "Stored encrypted by the gateway. Use only credentials approved for this deployment." },
       { name: "models", label: "Model aliases and prices (JSON object)", type: "json", required: true, value: '{"example-model":{"upstream_model":"provider-model-id","input_cost_per_million":1,"output_cost_per_million":3}}', help: "Replace the example with a real provider model and current prices. Prices are not automatically discovered." },
@@ -40,7 +40,7 @@
       { name: "expires_in_days", label: "Expires in days", type: "number", min: "1", max: "365", required: true, value: "30" },
       { name: "rpm", label: "Requests per minute", type: "number", min: "1", required: true, value: "60" },
       { name: "tpm", label: "Token allowance per minute", type: "number", min: "1", required: true, value: "10000" },
-      { name: "permissions", label: "Credential permissions (JSON array)", type: "json", required: true, value: '["inference"]', help: "inference: call models; account: manage only this key; admin: organization administration (administrator user required); provisioning: SCIM (administrator user required). Agent credentials support only [\"inference\"]. Grant only what the client needs." },
+      { name: "permissions", label: "Credential permissions (JSON array)", type: "json", required: true, value: '["inference"]', help: "inference: call models; account: manage only this key; admin: organization administration (administrator user required); provisioning: SCIM (administrator user required); team_admin: explicit administrator membership for this key’s team. Agent credentials support only [\"inference\"]. Grant only what the client needs." },
       { name: "allowed_models", label: "Allowed model aliases (JSON array)", type: "json", required: true, value: '["example-model"]', help: "Use explicit configured aliases. Review API policy before using an empty list." }
     ]
   };

@@ -49,6 +49,24 @@ class User(Base):
     oidc_subject: Mapped[str | None] = mapped_column(String(512), unique=True, nullable=True)
 
 
+class TeamMembership(Base):
+    __tablename__ = "team_memberships"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    team_id: Mapped[str] = mapped_column(ForeignKey("teams.id"), primary_key=True)
+    role: Mapped[str] = mapped_column(String(16), default="member")
+
+
+async def active_membership(session, user, team_id):
+    if not user or not user.enabled:
+        return False
+    if team_id is None:
+        return user.team_id is None
+    team = await session.get(Team, team_id)
+    if not team or not team.enabled:
+        return False
+    return user.team_id == team_id or await session.get(TeamMembership, (user.id, team_id)) is not None
+
+
 class Provider(Base):
     __tablename__ = "providers"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

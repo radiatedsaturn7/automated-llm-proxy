@@ -41,7 +41,7 @@ async def choose(model, endpoint):
         providers = list((await session.scalars(select(db.Provider).where(db.Provider.enabled.is_(True))
                             .order_by(db.Provider.priority, db.Provider.id))).all())
         candidates = [p for p in providers if model in p.models and
-                      (endpoint != 'embeddings' or p.kind in {'openai', 'azure_openai'})]
+                      (endpoint != 'embeddings' or p.kind in {'openai', 'azure_openai', 'gemini'})]
         if not candidates:
             raise HTTPException(404, 'Configured model not available')
         if not cfg.circuit_breaker_enabled:

@@ -32,7 +32,7 @@ async def exchange(request: Request):
         if not key or key.kind != "agent" or key.revoked or aware(key.expires_at) <= db.now():
             raise HTTPException(401, "Invalid agent credential")
         user = await s.get(db.User, key.user_id)
-        if not user or not user.enabled or key.team_id != user.team_id:
+        if not await db.active_membership(s, user, key.team_id):
             raise HTTPException(401, "User disabled or team changed")
         if key.team_id:
             team = await s.get(db.Team, key.team_id)

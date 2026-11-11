@@ -50,3 +50,24 @@ def test_cleanup_security_and_bounded_command():
 @pytest.mark.parametrize("setting", ["maintenance.batchSize=0", "maintenance.batchSize=10001", "maintenance.backoffLimit=4", "maintenance.activeDeadlineSeconds=0", "maintenance.schedule=@hourly", "maintenance.failedJobsHistoryLimit=11"])
 def test_invalid_cleanup_values_rejected(setting):
     render(setting, success=False)
+
+
+def test_guardrail_defaults_and_opt_in_render_all_workloads():
+    for enabled in [False, True]:
+        docs = render('maintenance.enabled=true', f'guardrails.enabled={str(enabled).lower()}', 'guardrails.detectors[0]=email', 'guardrails.action=redact')
+        workloads = [doc for doc in docs if doc['kind'] in {'Deployment', 'CronJob', 'Job'}]
+        assert len(workloads) == 3
+        for workload in workloads:
+            spec = workload['spec']
+            if workload['kind'] == 'CronJob':
+                spec = spec['jobTemplate']['spec']
+            env = {item['name']: item.get('value') for item in spec['template']['spec']['containers'][0]['env']}
+            assert env['GUARDRAILS_ENABLED'] == str(enabled).lower()
+            assert env['GUARDRAILS_ACTION'] == 'redact'
+            assert env['GUARDRAILS_DETECTORS'] == '["email"]'
+            assert env['GUARDRAILS_MAX_CHARACTERS'] == '262144'
+
+
+@pytest.mark.parametrize('setting', ['guardrails.detectors[0]=custom', 'guardrails.action=ignore', 'guardrails.maxCharacters=0'])
+def test_invalid_guardrails_rejected(setting):
+    render(setting, success=False)

@@ -42,3 +42,13 @@ These are gateway permissions, not OAuth scopes advertised by an authorization
 server. A least-privilege SCIM integration should use an expiring administrator-owned
 API credential with only `["provisioning"]`, stored in the IdP's approved secret
 configuration.
+
+## Team administration
+
+`team_admin` permits the separate `/teams/api` control plane only when the owner has
+an explicit administrator membership in the credential's selected team. It does
+not grant a global role. Delegated key issuance is inference-only, constrained by
+the caller key's model, rate and expiration ceilings. Global administrators with
+`admin` retain global authority without needing this additional permission.
+Browser sessions use current explicit membership roles. See
+[team-delegation.md](team-delegation.md) and `/team-admin` for the UI.

@@ -1,6 +1,7 @@
 import json
 from functools import lru_cache
 from urllib.parse import urlparse
+from typing import Literal
 
 from cryptography.fernet import Fernet
 from pydantic import Field, model_validator
@@ -8,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="", extra="ignore", hide_input_in_errors=True)
     database_url: str = "sqlite+aiosqlite:///./gateway.db"
     db_pool_size: int = Field(default=10, ge=1, le=200)
     db_max_overflow: int = Field(default=20, ge=0, le=200)
@@ -31,6 +32,10 @@ class Settings(BaseSettings):
     oidc_session_seconds: int = Field(default=28800, ge=300, le=86400)
     oidc_cache_seconds: int = Field(default=300, ge=10, le=3600)
     oidc_trusted_endpoint_origins: str = "[]"
+    guardrails_enabled: bool = False
+    guardrails_action: Literal["block", "redact"] = "block"
+    guardrails_detectors: str = '["secrets", "private_key"]'
+    guardrails_max_characters: int = Field(default=262144, ge=1024, le=1048576)
     metrics_token: str = ""
     provider_timeout_seconds: int = Field(default=120, ge=5, le=600)
     max_request_bytes: int = Field(default=1_048_576, ge=1024, le=10_485_760)
@@ -44,6 +49,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_secrets(self):
         Fernet(self.gateway_master_key.encode())
+        from .guardrails import BUILTINS
+        detectors = json.loads(self.guardrails_detectors)
+        if not isinstance(detectors, list) or not detectors or len(detectors) > len(BUILTINS) or any(not isinstance(x, str) or x not in BUILTINS for x in detectors) or len(set(detectors)) != len(detectors):
+            raise ValueError("GUARDRAILS_DETECTORS must contain unique builtin detector IDs")
         if self.db_lock_timeout_ms > self.db_statement_timeout_ms:
             raise ValueError("DB_LOCK_TIMEOUT_MS must not exceed DB_STATEMENT_TIMEOUT_MS")
         if not self.oidc_group_claim or len(self.oidc_group_claim) > 256 or any(not part for part in self.oidc_group_claim.split(".")):

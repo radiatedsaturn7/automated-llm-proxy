@@ -62,16 +62,12 @@ async def owned(session, identity, key_id):
     user = await session.get(db.User, identity.user.id)
     if not user or not user.enabled:
         raise HTTPException(401, "User unavailable")
-    if user.team_id:
-        team = await session.get(db.Team, user.team_id)
-        if not team or not team.enabled:
-            raise HTTPException(403, "Team unavailable")
     key = await session.get(db.APIKey, key_id)
     if not key or key.user_id != user.id or (identity.key and key.id != identity.key.id):
         raise HTTPException(404, "Key not found")
     if identity.key:
         caller = await session.get(db.APIKey, identity.key.id)
-        if caller.revoked or aware(caller.expires_at) <= db.now() or caller.team_id != user.team_id:
+        if caller.revoked or aware(caller.expires_at) <= db.now() or not await db.active_membership(session, user, caller.team_id):
             raise HTTPException(401, "Credential changed")
         if caller.kind != "api" or "account" not in caller.permissions:
             raise HTTPException(401, "Credential changed")
@@ -95,7 +91,7 @@ async def revoke(key_id: str, identity: Identity = Depends(member)):
 async def rotate(key_id: str, identity: Identity = Depends(member)):
     async with db.transaction() as session:
         user, key = await owned(session, identity, key_id)
-        if key.revoked or aware(key.expires_at) <= db.now() or key.team_id != user.team_id:
+        if key.revoked or aware(key.expires_at) <= db.now() or not await db.active_membership(session, user, key.team_id):
             raise HTTPException(
                 409, "Key is expired, revoked or belongs to a former team; ask an administrator"
             )

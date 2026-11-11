@@ -14,7 +14,7 @@ SDK -> loopback relay -> short-lived token exchange -> gateway replicas
 
 Stateless means no required replica-local durable data, not “no state anywhere.” Budgets, credentials, sessions and audit records necessarily persist. Production replicas must share the same PostgreSQL database, encryption key, signing key and OIDC configuration. SQLite is for one-process local development, not HA. HTTP connection pools and relay access-token caches are disposable in-memory state.
 
-Users belong to at most one team in this initial schema. Roles are administrator and member, not a general authorization policy language. Administrators provision model aliases, provider credentials and prices. Clients receive gateway keys, never provider credentials. API keys have expiry, revocation, model scope and rate limits. Agent credentials are a separate kind and exchange for short-lived inference tokens; they cannot administer the gateway.
+Users retain a source-managed primary team and may have explicit secondary memberships. Each key selects exactly one active team; user budgets remain shared across teams. Explicit team administrators have constrained team-local authority, not a general authorization policy language. See team-delegation.md for lifecycle and credential ceilings. Administrators provision model aliases, provider credentials and prices. Clients receive gateway keys, never provider credentials. API keys have expiry, revocation, model scope and rate limits. Agent credentials are a separate kind and exchange for short-lived inference tokens; they cannot administer the gateway.
 
 ## Accounting and concurrency
 

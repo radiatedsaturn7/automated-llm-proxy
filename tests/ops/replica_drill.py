@@ -14,6 +14,15 @@ COMPOSE = 'compose.yaml:tests/browser/compose.mock.yaml:tests/ops/compose.replic
 STAGE = 'safety_gate'
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def local_opener():
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+
+
 def require_disposable():
     if (os.environ.get('DISPOSABLE_REPLICA_DRILL') != '1' or os.environ.get('COMPOSE_FILE') != COMPOSE
             or os.environ.get('COMPOSE_PROJECT_NAME') != 'thunderbolt-replica-drill'):
@@ -43,7 +52,7 @@ def http(replica, path, key=None, body=None, method=None):
         headers={'Content-Type': 'application/json', **({'Authorization': 'Bearer ' + key} if key else {})},
         method=method)
     try:
-        with urllib.request.urlopen(request, timeout=55) as response:
+        with local_opener().open(request, timeout=55) as response:
             status, content = response.status, response.read()
     except urllib.error.HTTPError as exc:
         status, content = exc.code, exc.read()

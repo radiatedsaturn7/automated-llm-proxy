@@ -42,7 +42,7 @@ async def exchange(request: Request):
         if lifetime < 1:
             raise HTTPException(401, "Credential expired")
         token = jwt.encode({"sub": user.id, "kid": key.id, "aud": "llm-gateway", "iss": "llm-gateway",
-                            "iat": db.now(), "exp": db.now() + timedelta(seconds=lifetime), "jti": db.uid()},
+                            "gen": key.generation, "iat": db.now(), "exp": db.now() + timedelta(seconds=lifetime), "jti": db.uid()},
                            get_settings().gateway_signing_key, algorithm="HS256")
         await db.audit(s, user.id, "agent.exchange", key.id)
     return {"access_token": token, "expires_in": lifetime, "token_type": "Bearer"}

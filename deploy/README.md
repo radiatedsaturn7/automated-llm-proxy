@@ -235,3 +235,19 @@ git-ignored; the dummy upstream credential authorizes only this fixture.
 CI also runs `promtool check rules` using the official Prometheus image and a
 stdlib JSON structural check of the Grafana dashboard. These validate committed
 configuration, not live alert firing or dashboard rendering against production data.
+
+### Provider routing and circuit settings
+
+The chart exposes `providerTimeoutSeconds` (120), `circuitBreaker.enabled` (true),
+`circuitBreaker.failureThreshold` (3), `circuitBreaker.cooldownSeconds` (30), and
+`circuitBreaker.probeSeconds` (150). Values are checked against the application's
+configuration bounds. Use these chart values instead of duplicating their
+environment variables in `extraEnv` or the existing Secret.
+
+The application uses an effective probe lease of
+`max(circuitBreaker.probeSeconds, providerTimeoutSeconds + 30)`. Provider timeout
+is per read, so a long actively streaming response may still outlast the lease
+and overlap a replacement probe. Epoch fencing prevents a stale result from
+changing the newer circuit. No dispatched inference request is retried. See
+[provider health operations](../docs/provider-health.md) for shared database
+state, fallback behavior, reset endpoints and limitations.

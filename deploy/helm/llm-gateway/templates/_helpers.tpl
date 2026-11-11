@@ -42,6 +42,16 @@ env:
     value: {{ .Values.environment | quote }}
   - name: PUBLIC_URL
     value: {{ .Values.publicUrl | quote }}
+  - name: PROVIDER_TIMEOUT_SECONDS
+    value: {{ .Values.providerTimeoutSeconds | quote }}
+  - name: CIRCUIT_BREAKER_ENABLED
+    value: {{ .Values.circuitBreaker.enabled | quote }}
+  - name: CIRCUIT_FAILURE_THRESHOLD
+    value: {{ .Values.circuitBreaker.failureThreshold | quote }}
+  - name: CIRCUIT_COOLDOWN_SECONDS
+    value: {{ .Values.circuitBreaker.cooldownSeconds | quote }}
+  - name: CIRCUIT_PROBE_SECONDS
+    value: {{ .Values.circuitBreaker.probeSeconds | quote }}
 {{- with .Values.extraEnv }}
   {{- toYaml . | nindent 2 }}
 {{- end }}

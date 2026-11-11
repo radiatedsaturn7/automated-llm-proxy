@@ -6,18 +6,21 @@
 
 Apache-2.0 LLM gateway with a stateless application tier and external SQL policy/accounting state. An initial implementation for evaluation and hardening, **not a claim of production readiness or compliance certification**.
 
-## Working features
+## Implemented capabilities
 
-- OpenAI-compatible text chat, SSE streaming, embeddings, and model discovery; native Anthropic text chat adapter.
-- Explicit provider/model configuration, model allowlists, priority routing, encrypted provider credentials.
-- Users, teams, monthly USD budgets, concurrent request reservations, per-key minute request/token admission limits.
-- Hashed API keys, expiration, immediate revocation, explicit rotation, short-lived local-relay access tokens.
-- OIDC authorization-code SSO with PKCE, signature/issuer/audience/nonce checks, group-to-team/role mapping, server-side sessions and CSRF protection.
-- Admin web UI/API, metadata-only audit records, usage records, protected Prometheus metrics, health/readiness endpoints.
-- Deterministic prompt-output evaluation without paid model calls.
-- Docker Compose, Helm (including HA settings), Terraform Helm deployment, CI checks.
+- OpenAI-compatible text chat, SSE streaming, embeddings and model discovery; Azure OpenAI v1 and native Anthropic text-chat adapters.
+- Explicit provider/model aliases and prices, encrypted provider credentials, model allowlists and priority routing.
+- Users, one team per user, monthly USD budgets, concurrent reservations and per-key request/token admission limits.
+- Hashed API credentials with explicit inference/admin/account/provisioning permissions, expiration and revocation; rotation preserves scope and expiry.
+- OIDC SSO with PKCE, verified identity tokens, nested group mappings, bounded metadata/JWKS caching, configurable sessions and CSRF protection; explicit identity linking and session revocation.
+- A bounded SCIM Users/Groups subset, administrator console and member self-service portal.
+- Immutable prompt versions, literal variable previews and saved deterministic offline evaluations, without paid evaluation model calls.
+- Metadata audit/usage records, signed-cursor exports, request correlation, protected Prometheus metrics and example dashboards/alerts.
+- Docker Compose, Helm/HA settings, Terraform Helm deployment, serialized migrations and CI checks.
 
-**State lives outside replicas**, not nowhere: users, keys, budgets, sessions and audit records require durable shared state. PostgreSQL is required in production; SQLite is single-process development only. Provider request bodies and responses are not saved by the gateway.
+Also implemented: shared per-model provider circuit breakers, opt-in journaled agent-secret rollover, bounded browser export downloads and paired offline regression gates. See the [feature matrix](docs/feature-matrix.md) for verification evidence and limitations.
+
+**State lives outside gateway replicas**, not nowhere: users, keys, budgets, sessions, audit and provider health need durable shared state. PostgreSQL is required in production; SQLite is single-process development only. Inference bodies/responses are not logged or retained by the gateway. Prompt templates are stored in plaintext only when an administrator explicitly saves them in the registry; protect that database and its backups.
 
 ## Try locally
 
@@ -49,6 +52,10 @@ uv run ruff check .
 - [Versioned migrations and legacy adoption](docs/migrations.md)
 - [Prompt registry and evaluation reports](docs/prompts.md)
 - [Member self-service](docs/self-service.md)
+- [Credential permissions and least-privilege integrations](docs/credential-permissions.md)
+- [Audit/usage export and signed pagination](docs/audit-export.md)
+- [Provider health and shared circuit breakers](docs/provider-health.md)
+- [Admission concurrency and lock semantics](docs/policy-concurrency.md)
 - [Observability and monitoring](docs/observability.md)
 - [Provider compatibility](docs/providers.md)
 - [SCIM provisioning subset](docs/provisioning.md)
@@ -61,9 +68,9 @@ uv run ruff check .
 
 ## Important boundaries
 
-Budgets are admission controls using conservative reservations and provider-reported usage, **not a contractual hard billing cap**. Configure accurate prices and upstream account limits. Interrupted/unknown outcomes remain conservatively charged; reconcile only after checking provider billing. Token admission is estimated. Inference uses shared coordination and deterministic team/user/key row locks; unrelated teams can proceed concurrently. Same-team budget admission still serializes and must be benchmarked before scaling. No automatic retries after dispatch, to avoid duplicate billing. Priority routing is not health-aware failover.
+Budgets are admission controls using conservative reservations and provider-reported usage, **not a contractual hard billing cap**. Configure accurate prices and upstream account limits. Interrupted/unknown outcomes remain conservatively charged; reconcile only after checking provider billing. Token admission is estimated. Inference uses shared coordination and deterministic team/user/key row locks; unrelated teams can proceed concurrently. Same-team budget admission still serializes and must be benchmarked before scaling. No automatic retries after dispatch, to avoid duplicate billing. The shared circuit breaker skips unhealthy routes for later requests; it never replays an already-dispatched request. Equivalent models, prices and data-handling policy on fallback providers must be configured by an administrator.
 
-OIDC groups are refreshed on login, not continuously. Sessions last up to eight hours; disable a user for immediate gateway revocation. No built-in password authentication, SAML, full SCIM interoperability certification, device authorization, credential-vault rotation, arbitrary plugin execution, multimodal adapter, distributed cache, semantic routing, or LLM-as-judge evaluation is claimed. The relay renews gateway access tokens; its bootstrap agent credential still requires secure provisioning and eventual renewal.
+OIDC groups are refreshed on login, not continuously. Session lifetime is configurable from five minutes to 24 hours (default eight hours); disable a user for immediate gateway access revocation. Already-admitted provider work is not canceled by revocation. No built-in password authentication, SAML, full SCIM interoperability certification, device authorization, credential-vault rotation, arbitrary plugin execution, multimodal adapter, distributed cache, semantic routing, or LLM-as-judge evaluation is claimed. The relay renews short-lived gateway tokens. Opt-in durable agent-secret rotation requires a protected local journal and remains subject to the original credential expiry; it does not rotate provider keys or eliminate initial provisioning. Environment-only relay operation retains manual agent-secret rollover. Gateway replicas stay stateless, but opting into the relay journal deliberately adds protected client-side state.
 
 Schema changes use serialized versioned migrations. Databases created by the initial release require an explicit, validated `--adopt-v1` step after backup; see the migration guide. HA app replicas do not create an HA database. External TLS, database HA/backups, secret management, egress controls, billing/audit archival, load/chaos tests, and an independent security review remain operator requirements. Dependency versions are recorded in `uv.lock`; container runtime packages use hashed `requirements.lock`.
 

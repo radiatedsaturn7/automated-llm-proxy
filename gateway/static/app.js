@@ -9,6 +9,7 @@
     providers: "Register trusted provider endpoints. Provider credentials are write-only and are never displayed by this interface.",
     keys: "Issue scoped, expiring credentials. Raw keys appear once at creation or rotation.",
     audit: "Administrative and request metadata. Prompts and model responses should not be included in these records.",
+    exports: "Download a bounded, fixed-window metadata export to your device.",
     prompts: "Version prompts explicitly, preview literal variables and save deterministic evaluation reports.",
     evaluation: "Run bounded, deterministic checks on supplied outputs. No provider requests are made."
   };
@@ -72,10 +73,26 @@
     if (!["GET", "HEAD", "OPTIONS"].includes(method) && state.csrf) headers["X-CSRF-Token"] = state.csrf;
     const response = await fetch(path, {
       method, headers, credentials: "same-origin", cache: "no-store",
+      signal: options.signal,
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     });
     let data = null;
-    const text = await response.text();
+    let text;
+    if (options.maxBytes && response.body) {
+      const reader = response.body.getReader(); const chunks = []; let length = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read(); if (done) break;
+          length += value.byteLength;
+          if (length > options.maxBytes) throw new Error("Export page exceeds the browser size limit. Narrow the window or use the API.");
+          chunks.push(value);
+        }
+      } catch (error) { await reader.cancel().catch(() => {}); throw error; }
+      finally { reader.releaseLock(); }
+      const bytes = new Uint8Array(length); let offset = 0;
+      chunks.forEach((chunk) => { bytes.set(chunk, offset); offset += chunk.byteLength; });
+      text = new TextDecoder().decode(bytes);
+    } else text = await response.text();
     if (text) {
       try { data = JSON.parse(text); } catch (_) { data = null; }
     }
@@ -245,12 +262,13 @@
     $("view-title").textContent = state.view[0].toUpperCase() + state.view.slice(1);
     $("view-description").textContent = descriptions[state.view];
     $("evaluation").hidden = state.view !== "evaluation";
-    $("table-wrap").hidden = ["evaluation", "prompts"].includes(state.view);
+    $("table-wrap").hidden = ["evaluation", "prompts", "exports"].includes(state.view);
     $("prompts").hidden = state.view !== "prompts";
+    $("exports").hidden = state.view !== "exports";
     $("summary").hidden = state.view !== "overview";
     if (rebuild) renderEditor();
     try {
-      if (state.view === "evaluation") return;
+      if (["evaluation", "exports"].includes(state.view)) return;
       if (state.view === "prompts") { await loadPrompts(); return; }
       const data = await api(`/admin/api/${state.view === "overview" ? "usage" : state.view}`);
       if (generation !== state.generation || !state.authenticated) return;
@@ -263,6 +281,58 @@
     } catch (error) { if (generation === state.generation) showError(error); }
     finally { if (generation === state.generation) $("refresh").disabled = false; }
   }
+  let exportGeneration = 0;
+  let exportController = null;
+  function cancelExport(reason = "Export canceled. No file downloaded.") {
+    ++exportGeneration;
+    if (exportController) { exportController.abort(); exportController = null; $("export-progress").textContent = reason; }
+    $("export-start").disabled = false; $("export-cancel").disabled = true;
+  }
+  function exportDefaults() {
+    const end = new Date(); end.setUTCSeconds(0, 0);
+    $("export-until").value = end.toISOString().slice(0, 16);
+    $("export-since").value = new Date(end.getTime() - 86400000).toISOString().slice(0, 16);
+  }
+  exportDefaults();
+  $("export-cancel").addEventListener("click", () => cancelExport());
+  $("export-form").addEventListener("submit", async (event) => {
+    event.preventDefault(); cancelExport(); clearError();
+    const generation = exportGeneration;
+    const controller = new AbortController(); exportController = controller;
+    $("export-start").disabled = true; $("export-cancel").disabled = false;
+    try {
+      const since = new Date($("export-since").value + "Z"); const until = new Date($("export-until").value + "Z");
+      if (!Number.isFinite(since.getTime()) || !Number.isFinite(until.getTime()) || since >= until || until > new Date() || until - since > 31 * 86400000) throw new Error("Choose a past UTC window with start before end and at most 31 days.");
+      const kind = $("export-kind").value;
+      if (!["audit", "usage"].includes(kind)) throw new Error("Unknown export type.");
+      let query = new URLSearchParams({ since: since.toISOString(), until: until.toISOString(), limit: "250" });
+      const records = []; let bytes = 0; const cursors = new Set(); const encoder = new TextEncoder();
+      for (let page = 0; page < 20; page++) {
+        $("export-progress").textContent = `Fetching page ${page + 1}; ${records.length} records received…`;
+        const result = await api(`/admin/api/exports/${kind}?${query}`, { signal: controller.signal, maxBytes: 1048576 });
+        if (generation !== exportGeneration || !state.authenticated || state.view !== "exports") return;
+        if (!Array.isArray(result?.records) || result.records.length > 250) throw new Error("Invalid export page. No file downloaded.");
+        bytes += encoder.encode(JSON.stringify(result.records)).byteLength;
+        if (bytes > 4 * 1024 * 1024 || records.length + result.records.length > 5000) throw new Error("Browser export limit reached. No file downloaded. Narrow the window or use the paginated API.");
+        records.push(...result.records);
+        if (!result.next_cursor) {
+          const blob = new Blob([JSON.stringify({ kind, since: result.since, until: result.until, records }, null, 0)], {type: "application/json"});
+          const url = URL.createObjectURL(blob); const link = node("a"); link.href = url;
+          link.download = `thunderbolt-${kind}-${since.toISOString().slice(0, 10)}.json`;
+          document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+          $("export-progress").textContent = `Downloaded ${records.length} records. Protect this file on your device.`;
+          return;
+        }
+        if (typeof result.next_cursor !== "string" || result.next_cursor.length > 4096 || cursors.has(result.next_cursor)) throw new Error("Invalid or repeated export cursor. No file downloaded.");
+        cursors.add(result.next_cursor); query = new URLSearchParams({ cursor: result.next_cursor, limit: "250" });
+      }
+      throw new Error("Browser export limit reached. No file downloaded. Narrow the window or use the paginated API.");
+    } catch (error) {
+      if (generation === exportGeneration && !controller.signal.aborted) { $("export-progress").textContent = "No file downloaded."; showError(error); }
+    } finally {
+      if (generation === exportGeneration) { exportController = null; $("export-start").disabled = false; $("export-cancel").disabled = true; }
+    }
+  });
   const promptState = { templates: [], versions: [], generation: 0 };
   const promptBase = "/admin/api/prompt-registry";
   function promptPath() {
@@ -383,7 +453,7 @@
   });
   $("navigation").addEventListener("click", (event) => {
     const target = event.target.closest("button[data-view]"); if (!target) return;
-    state.view = target.dataset.view;
+    cancelExport(); state.view = target.dataset.view;
     document.querySelectorAll("[data-view]").forEach((button) => button.removeAttribute("aria-current"));
     target.setAttribute("aria-current", "page"); loadView(true);
   });
@@ -417,11 +487,11 @@
     finally { button.disabled = false; }
   });
   $("disconnect").addEventListener("click", async () => {
-    clearError();
+    cancelExport(); clearError();
     try { await api("/auth/logout", { method: "POST" }); }
     catch (error) { showError(new Error(`Server sign-out could not be confirmed: ${error.message}. Close this tab and end the session at your identity provider if necessary.`)); }
     finally {
-      state.bearer = ""; state.csrf = ""; state.authenticated = false; ++state.generation; clearPrompts();
+      state.bearer = ""; state.csrf = ""; state.authenticated = false; ++state.generation; clearPrompts(); cancelExport();
       $("secret-dialog").close(); clearSecret(); $("resource-form").replaceChildren(); $("table-wrap").replaceChildren(); $("summary").replaceChildren(); $("eval-result").textContent = "";
       $("workspace").hidden = true; $("login").hidden = false; $("identity").textContent = "Not signed in"; message("Local credentials cleared.");
     }
@@ -433,6 +503,6 @@
     try { await navigator.clipboard.writeText($("new-secret").value); $("copy-status").textContent = "Copied. Clear your clipboard after storing the credential."; }
     catch (_) { $("copy-status").textContent = "Clipboard unavailable. Select the credential and copy it manually."; }
   });
-  window.addEventListener("pagehide", () => { state.bearer = ""; state.csrf = ""; clearSecret(); clearPrompts(); });
+  window.addEventListener("pagehide", () => { state.bearer = ""; state.csrf = ""; clearSecret(); clearPrompts(); cancelExport(); });
   connect().catch(() => { /* A signed-out page is the expected initial state. */ });
 })();

@@ -11,6 +11,12 @@ fullnameOverride: ''
 existingSecret: '' # Required: DATABASE_URL, GATEWAY_MASTER_KEY, GATEWAY_SIGNING_KEY, BOOTSTRAP_TOKEN, METRICS_TOKEN.
 environment: production
 publicUrl: https://gateway.example.com
+providerTimeoutSeconds: 120 # Per-read/connect request timeout; not total stream duration.
+circuitBreaker:
+  enabled: true
+  failureThreshold: 3
+  cooldownSeconds: 30
+  probeSeconds: 150 # Runtime uses max(this, providerTimeoutSeconds + 30).
 extraEnv: [] # Non-secret settings only; use valueFrom.secretKeyRef for additional secrets.
 service:
   port: 8080

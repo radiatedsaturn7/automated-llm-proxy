@@ -1,26 +1,99 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["existingSecret", "image", "replicaCount", "publicUrl"],
+  "required": [
+    "existingSecret",
+    "image",
+    "replicaCount",
+    "publicUrl"
+  ],
   "properties": {
-    "existingSecret": {"type": "string", "minLength": 1},
-    "replicaCount": {"type": "integer", "minimum": 1},
-    "environment": {"type": "string", "enum": ["production", "development"]},
-    "publicUrl": {"type": "string", "pattern": "^https?://"},
+    "existingSecret": {
+      "type": "string",
+      "minLength": 1
+    },
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "environment": {
+      "type": "string",
+      "enum": [
+        "production",
+        "development"
+      ]
+    },
+    "publicUrl": {
+      "type": "string",
+      "pattern": "^https?://"
+    },
     "image": {
       "type": "object",
       "properties": {
-        "repository": {"type": "string", "minLength": 1},
-        "tag": {"type": "string", "minLength": 1},
-        "digest": {"type": "string", "pattern": "^(|sha256:[a-f0-9]{64})$"}
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^(|sha256:[a-f0-9]{64})$"
+        }
       }
     },
     "autoscaling": {
       "type": "object",
       "properties": {
-        "minReplicas": {"type": "integer", "minimum": 1},
-        "maxReplicas": {"type": "integer", "minimum": 1},
-        "targetCPUUtilizationPercentage": {"type": "integer", "minimum": 1, "maximum": 100}
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "targetCPUUtilizationPercentage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "providerTimeoutSeconds": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 600
+    },
+    "circuitBreaker": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "failureThreshold",
+        "cooldownSeconds",
+        "probeSeconds"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "failureThreshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cooldownSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "probeSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 1800
+        }
       }
     }
   }

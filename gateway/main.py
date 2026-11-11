@@ -13,7 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from . import account, admin, auth, db, exports, inference, prompts, scim
+from . import account, admin, agent_rotation, auth, comparisons, db, exports, inference, prompts, scim
 from .config import get_settings
 from .observability import ObservabilityMiddleware
 
@@ -67,12 +67,14 @@ class BodyLimitMiddleware:
 
 app = FastAPI(title="Thunderbolt", version="0.1.0", lifespan=lifespan)
 app.add_middleware(BodyLimitMiddleware)
+app.include_router(comparisons.router)
 app.include_router(exports.router)
 app.include_router(prompts.router)
 app.include_router(account.router)
 app.include_router(scim.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
+app.include_router(agent_rotation.router)
 app.include_router(inference.router)
 app.mount("/admin/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 

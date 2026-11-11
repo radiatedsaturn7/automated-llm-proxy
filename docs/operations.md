@@ -49,3 +49,13 @@ Forbid is not a cross-release lock. Use small batches under load, and verify
 that configured NetworkPolicy egress permits the actual database destination.
 The pod has maintenance component labels, so it is never selected by the
 inference Service or PodDisruptionBudget.
+
+## Readiness and upgrades
+
+`/health/ready` checks connectivity, the policy-lock row and the exact migration
+ledger expected by this binary. An old replica against a newer schema, or a
+partially migrated installation, returns 503 while `/health/live` stays live.
+This is a cheap routing probe, not a full schema-drift inspection; run the
+read-only preflight above before admitting a release. Plan schema upgrades with
+a maintenance window unless the specific migration documents rolling-version
+compatibility. No migration runs automatically on application startup.

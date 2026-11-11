@@ -1,6 +1,6 @@
 # Local relay
 
-The relay lets an SDK keep using one local token while the relay obtains short-lived central gateway access tokens. It does **not** rotate provider-owned API keys or remove the need to secure a bootstrap credential. The central administrator creates and revokes that agent credential; without the opt-in durable journal below, rotating it requires updating the relay environment and restarting it. This is an exchange protocol, not an OAuth refresh-token or device-authorization implementation.
+The relay lets an SDK keep using one local token while the relay obtains short-lived central gateway access tokens. It does **not** rotate provider-owned API keys or remove the need to secure a bootstrap credential. The central administrator can issue it, or optional browser SSO enrollment below can create it without manually copying a root key; without the opt-in durable journal below, rotating it requires updating the relay environment and restarting it. These are gateway-specific exchange/enrollment protocols, not a claim of OAuth device-authorization standard compliance.
 
 Run after installing the package:
 
@@ -12,7 +12,7 @@ export RELAY_LOCAL_TOKEN='<distinct-random-local-token-at-least-32-characters>'
 python -m gateway.relay
 ```
 
-Configure SDK base URL `http://127.0.0.1:8090/v1` and API key equal to `RELAY_LOCAL_TOKEN`. Supported routes: chat completions (including SSE), embeddings and models. The local API token is mandatory. The root credential only goes to gateway agent exchange/rotation endpoints, never to client code or the inference endpoint. Cached access tokens live only in memory, refresh before expiry, and concurrent calls share a single exchange. Revocation is enforced by the central gateway; an exchange failure fails closed rather than using an expired token.
+Configure SDK base URL `http://127.0.0.1:8090/v1` and API key equal to `RELAY_LOCAL_TOKEN`. Supported routes: chat completions (including SSE), the text-only Responses subset, embeddings and models. The local API token is mandatory. The root credential only goes to gateway agent enrollment/exchange/rotation endpoints, never to client code or the inference endpoint. Cached access tokens live only in memory, refresh before expiry, and concurrent calls share a single exchange. Revocation is enforced by the central gateway; an exchange failure fails closed rather than using an expired token.
 
 Binding defaults to `127.0.0.1:8090`. A nonloopback `RELAY_BIND` requires `RELAY_ALLOW_REMOTE_BIND=true`. Do not expose the plain HTTP relay directly to a network. Put TLS and network access controls in front if remote access is required. There is no CORS support, generic URL forwarding, or unauthenticated inference route. `/health/live` only reports process liveness.
 
@@ -77,3 +77,57 @@ symlinks, another process holding the lock, storage failures or unexpected serve
 responses fail closed. Back up and inspect privately; never paste journal contents
 into logs or support tickets. Automatic expiry extension and password-manager/OS
 keychain integration are not provided.
+
+## Optional SSO browser enrollment (schema revision 9)
+
+Operators enable enrollment with an explicit nonempty model allowlist and finite
+expiry/RPM/TPM policy. See [enrollment policy](enrollment.md). It is disabled by
+default. No model request is made during enrollment.
+
+```sh
+mkdir -m 700 /absolute/private/relay-device
+python -m gateway.enroll --gateway https://gateway.example.com \
+  --journal /absolute/private/relay-device --name 'Workstation relay'
+```
+
+The command creates and fsyncs a random 256-bit root in the private journal
+**before** sending it over TLS. It prints only a public approval code and the
+browser page URL. Sign into SSO on that page, paste the code, review the device
+name and policy, select an active team, and explicitly approve. A URL visit never
+approves anything. Never approve a device you did not start yourself: a malicious
+person can ask you to approve their device. Treat this as an access grant.
+
+The command polls with its secret proof (five-second minimum). The server stores
+only an HMAC digest, not the root. It atomically creates an inference-only agent
+key bound to your selected team. The journal then records completion. Run:
+
+```sh
+export CENTRAL_GATEWAY_URL=https://gateway.example.com
+export RELAY_JOURNAL_DIRECTORY=/absolute/private/relay-device
+export RELAY_LOCAL_TOKEN='<separate-random-local-token-at-least-32-characters>'
+# No RELAY_CREDENTIAL is needed for the enrolled journal.
+python -m gateway.relay
+```
+
+The relay refuses a pending enrollment journal. The enrollment command and relay
+cannot concurrently own the same journal. If a start/poll response is lost, rerun
+the enrollment command using the **same directory**. Duplicate approval cannot
+create duplicate keys or switch owner/team. The public approval expires after ten
+minutes, but if approval already committed, secret-authenticated recovery can
+recover the same active key even after the enrollment record was cleaned up.
+Recovery requires matching original request ID, current root, live membership,
+enabled user/team, and unexpired/unrevoked inference agent key. It never renews
+expiry or revives access. No plaintext root appears in stdout or error details.
+
+If an unapproved request expires, is denied, or policy changes before approval,
+it cannot be approved later. Stop the old enrollment process, retain its journal
+for investigation, and start a new enrollment in a new private directory. If
+approval may have succeeded but recovery is denied, check/revoke that device in
+the account portal before enrolling anew. Do not delete an uncertain journal or
+create duplicate devices automatically. Existing manually provisioned journals
+are not silently converted. No OS keychain integration is claimed.
+
+Anonymous initiation is atomically capacity-bounded in the shared database, and
+random polling proofs are rejected before acquiring the exclusive policy gate.
+Put per-source rate limiting on enrollment endpoints at the ingress: bounded
+storage alone cannot prevent attackers exhausting anonymous pending slots.

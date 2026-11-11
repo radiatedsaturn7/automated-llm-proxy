@@ -95,6 +95,7 @@ class ProviderHealth(Base):
 
 class APIKey(Base):
     __tablename__ = "api_keys"
+    enrollment_request_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True)
     __table_args__ = (Index("ix_api_keys_user_created_id", "user_id", "created_at", "id"),)
     generation: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     last_rotation_operation: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -112,6 +113,21 @@ class APIKey(Base):
     rpm: Mapped[int] = mapped_column(Integer, default=60)
     tpm: Mapped[int] = mapped_column(Integer, default=100000)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AgentEnrollment(Base):
+    __tablename__ = "agent_enrollments"
+    approval_code: Mapped[str] = mapped_column(String(36), unique=True)
+    request_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    candidate_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    device_name: Mapped[str] = mapped_column(String(120))
+    policy: Mapped[dict] = mapped_column(JSON)
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_poll: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id"), nullable=True)
 
 
 class AgentRotation(Base):

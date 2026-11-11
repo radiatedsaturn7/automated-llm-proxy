@@ -115,3 +115,13 @@ unchanged; no delegated administrator authority is backfilled. Keys may select a
 active explicit secondary membership after upgrade. SCIM/OIDC continue to manage
 the primary relationship. See [team-delegation.md](team-delegation.md) before rollout,
 particularly removal/revocation and independent secondary reconciliation rules.
+
+## Revision 9: optional device enrollment
+
+Adds digest-only, time-limited agent enrollment records and a nullable unique
+API-key enrollment request ID. Existing keys retain null IDs and all prior
+permissions. The ID permits proof-authenticated recovery of already-approved
+keys after pending-record cleanup; it is not an authentication secret. Run the
+ordinary migration job under a maintenance plan before enabling enrollment.
+No root credentials are backfilled, generated, or logged by migration. Disabling
+enrollment does not revoke already-issued agent keys; revoke them explicitly.

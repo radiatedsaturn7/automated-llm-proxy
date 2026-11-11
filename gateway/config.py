@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     guardrails_action: Literal["block", "redact"] = "block"
     guardrails_detectors: str = '["secrets", "private_key"]'
     guardrails_max_characters: int = Field(default=262144, ge=1024, le=1048576)
+    enrollment_enabled: bool = False
+    enrollment_allowed_models: str = "[]"
+    enrollment_key_days: int = Field(default=30, ge=1, le=90)
+    enrollment_rpm: int = Field(default=60, ge=1, le=10000)
+    enrollment_tpm: int = Field(default=100000, ge=1, le=10000000)
+    enrollment_max_pending: int = Field(default=1000, ge=1, le=10000)
     metrics_token: str = ""
     provider_timeout_seconds: int = Field(default=120, ge=5, le=600)
     max_request_bytes: int = Field(default=1_048_576, ge=1024, le=10_485_760)
@@ -49,6 +55,11 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_secrets(self):
         Fernet(self.gateway_master_key.encode())
+        models = json.loads(self.enrollment_allowed_models)
+        if (not isinstance(models, list) or len(models) > 100
+                or any(not isinstance(m, str) or not m or len(m) > 128 for m in models)
+                or len(set(models)) != len(models) or (self.enrollment_enabled and not models)):
+            raise ValueError("ENROLLMENT_ALLOWED_MODELS must be unique model aliases, nonempty when enabled")
         from .guardrails import BUILTINS
         detectors = json.loads(self.guardrails_detectors)
         if not isinstance(detectors, list) or not detectors or len(detectors) > len(BUILTINS) or any(not isinstance(x, str) or x not in BUILTINS for x in detectors) or len(set(detectors)) != len(detectors):

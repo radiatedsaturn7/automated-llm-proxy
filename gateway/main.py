@@ -13,9 +13,10 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from . import account, admin, agent_rotation, auth, comparisons, db, exports, inference, prompts, scim, teams
+from . import account, admin, agent_rotation, auth, comparisons, db, enrollment, exports, inference, prompts, responses, scim, teams
 from .config import get_settings
 from .observability import ObservabilityMiddleware
+from .migrate import HEAD, versions
 
 
 @asynccontextmanager
@@ -76,7 +77,9 @@ app.include_router(scim.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(agent_rotation.router)
+app.include_router(enrollment.router)
 app.include_router(inference.router)
+app.include_router(responses.router)
 app.mount("/admin/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
@@ -122,8 +125,10 @@ async def ready():
     try:
         async with db.session_factory() as s:
             row = await s.scalar(select(db.PolicyLock.id).where(db.PolicyLock.id == 1))
-            if row != 1:
-                raise RuntimeError("Schema not initialized")
+            applied = (await s.execute(select(versions.c.version).order_by(versions.c.version)
+                                       .limit(HEAD + 1))).scalars().all()
+            if row != 1 or applied != list(range(1, HEAD + 1)):
+                raise RuntimeError("Schema requires migration")
     except Exception:
         raise HTTPException(503, "Database/schema unavailable") from None
     return {"status": "ready"}
@@ -154,3 +159,8 @@ async def user_portal():
 @app.get("/team-admin", include_in_schema=False)
 async def team_admin_page():
     return FileResponse(Path(__file__).parent / "static" / "teams.html")
+
+
+@app.get("/relay-enroll", include_in_schema=False)
+async def relay_enrollment_page():
+    return FileResponse(Path(__file__).parent / "static" / "enroll.html")

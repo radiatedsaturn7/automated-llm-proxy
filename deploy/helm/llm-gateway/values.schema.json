@@ -260,6 +260,70 @@
           "maximum": 1048576
         }
       }
+    },
+    "enrollment": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "allowedModels",
+        "keyDays",
+        "rpm",
+        "tpm",
+        "maxPending"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "allowedModels": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "keyDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 90
+        },
+        "rpm": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "tpm": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "maxPending": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "allowedModels": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

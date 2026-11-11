@@ -71,3 +71,21 @@ def test_guardrail_defaults_and_opt_in_render_all_workloads():
 @pytest.mark.parametrize('setting', ['guardrails.detectors[0]=custom', 'guardrails.action=ignore', 'guardrails.maxCharacters=0'])
 def test_invalid_guardrails_rejected(setting):
     render(setting, success=False)
+
+
+def test_enrollment_chart_defaults_and_finite_opt_in():
+    docs = render()
+    deployment = next(x for x in docs if x['kind'] == 'Deployment')
+    env = {x['name']: x.get('value') for x in deployment['spec']['template']['spec']['containers'][0]['env']}
+    assert env['ENROLLMENT_ENABLED'] == 'false'
+    assert env['ENROLLMENT_ALLOWED_MODELS'] == '[]'
+    docs = render('enrollment.enabled=true', 'enrollment.allowedModels[0]=chat')
+    deployment = next(x for x in docs if x['kind'] == 'Deployment')
+    env = {x['name']: x.get('value') for x in deployment['spec']['template']['spec']['containers'][0]['env']}
+    assert env['ENROLLMENT_ALLOWED_MODELS'] == '["chat"]'
+    assert env['ENROLLMENT_KEY_DAYS'] == '30'
+
+
+@pytest.mark.parametrize('setting', ['enrollment.enabled=true','enrollment.keyDays=91','enrollment.rpm=0','enrollment.maxPending=10001'])
+def test_invalid_enrollment_policy_rejected(setting):
+    render(setting, success=False)

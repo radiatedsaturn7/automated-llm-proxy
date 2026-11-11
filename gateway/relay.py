@@ -234,6 +234,7 @@ def create_relay_app(settings: RelaySettings | None = None, client: httpx.AsyncC
         return StreamingResponse(response_body(), status_code=upstream.status_code, headers=headers)
 
     app.add_api_route("/v1/chat/completions", forward, methods=["POST"])
+    app.add_api_route("/v1/responses", forward, methods=["POST"])
     app.add_api_route("/v1/embeddings", forward, methods=["POST"])
     app.add_api_route("/v1/models", forward, methods=["GET"])
     return app

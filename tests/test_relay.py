@@ -134,3 +134,21 @@ def test_5xx_is_not_replayed():
                 assert response.status_code == 503
                 assert inference == 1
     run(check())
+
+
+def test_responses_route_uses_local_auth_and_short_lived_token():
+    async def check():
+        async def upstream(request):
+            if request.url.path == '/auth/agent/exchange':
+                return httpx.Response(200, json={'access_token': 'ephemeral', 'expires_in': 300})
+            assert request.url.path == '/v1/responses'
+            assert request.headers['authorization'] == 'Bearer ephemeral'
+            return httpx.Response(200, json={'object': 'response', 'output': []})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as central:
+            app = create_relay_app(settings(), central)
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://relay') as local:
+                assert (await local.post('/v1/responses', json={})).status_code == 401
+                response = await local.post('/v1/responses', json={'model':'example', 'input':'hello'},
+                                            headers={'Authorization':'Bearer '+'l'*32})
+                assert response.status_code == 200
+    run(check())

@@ -76,6 +76,18 @@ env:
     value: {{ .Values.guardrails.detectors | toJson | quote }}
   - name: GUARDRAILS_MAX_CHARACTERS
     value: {{ .Values.guardrails.maxCharacters | quote }}
+  - name: ENROLLMENT_ENABLED
+    value: {{ .Values.enrollment.enabled | quote }}
+  - name: ENROLLMENT_ALLOWED_MODELS
+    value: {{ .Values.enrollment.allowedModels | toJson | quote }}
+  - name: ENROLLMENT_KEY_DAYS
+    value: {{ .Values.enrollment.keyDays | quote }}
+  - name: ENROLLMENT_RPM
+    value: {{ .Values.enrollment.rpm | quote }}
+  - name: ENROLLMENT_TPM
+    value: {{ .Values.enrollment.tpm | quote }}
+  - name: ENROLLMENT_MAX_PENDING
+    value: {{ .Values.enrollment.maxPending | quote }}
 {{- with .Values.extraEnv }}
   {{- toYaml . | nindent 2 }}
 {{- end }}

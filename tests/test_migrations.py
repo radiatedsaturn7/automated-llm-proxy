@@ -240,3 +240,23 @@ async def test_v8_preserves_legacy_primary_without_privilege_backfill(migration_
     async with migration_engine.connect() as conn:
         assert (await conn.execute(select(db.User.team_id))).scalars().all() == ['primary']
         assert (await conn.execute(select(db.TeamMembership))).all() == []
+
+
+async def test_v9_identity_upgrade_fails_closed(migration_engine):
+    from gateway.migrations import REVISIONS, v0009
+    async with migration_engine.begin() as conn:
+        await conn.run_sync(version_metadata.create_all)
+        for number, revision in REVISIONS:
+            if number > 9:
+                break
+            await conn.run_sync(revision.upgrade)
+            await conn.execute(versions.insert().values(version=number, applied_at=db.now()))
+        await conn.execute(v0009.metadata.tables['users'].insert().values(
+            id='legacy-user', email='legacy@example.com', role='member', enabled=True))
+        await conn.execute(v0009.metadata.tables['browser_sessions'].insert().values(
+            digest='a' * 64, user_id='legacy-user', csrf='test-csrf', expires_at=db.now()))
+    assert await migrate() == HEAD
+    async with migration_engine.connect() as conn:
+        assert (await conn.execute(text("SELECT scim_managed FROM users WHERE id='legacy-user'"))).scalar()
+        assert (await conn.execute(text('SELECT COUNT(*) FROM browser_sessions'))).scalar() == 0
+        assert (await conn.execute(text('SELECT COUNT(*) FROM local_passwords'))).scalar() == 0

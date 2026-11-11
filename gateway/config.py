@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     bootstrap_token: str = Field(min_length=32)
     environment: str = "development"
     public_url: str = "http://localhost:8080"
+    local_password_enabled: bool = False
+    local_session_seconds: int = Field(default=3600, ge=300, le=28800)
     oidc_issuer: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: str = ""

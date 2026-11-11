@@ -50,7 +50,7 @@ async def list_resource(resource: str, identity: Identity = Depends(admin),
     if resource == "settings":
         cfg = get_settings()
         return {"environment": cfg.environment, "oidc_enabled": bool(cfg.oidc_issuer),
-                "password_login": False, "budget_period": "UTC calendar month", "version": "0.1.0"}
+                "password_login": cfg.local_password_enabled, "budget_period": "UTC calendar month", "version": "0.1.0"}
     if resource not in models:
         raise HTTPException(404, "Not found")
     model = models[resource]

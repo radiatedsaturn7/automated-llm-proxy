@@ -140,3 +140,50 @@ async def test_new_signing_kid_refreshes_cached_jwks(client, oidc):
     state = await start(client, oidc)
     response = await client.get('/auth/oidc/callback', params={'state': state, 'code': 'second'})
     assert response.status_code == 303, response.text
+
+
+@pytest.mark.parametrize('logout_sid,expected', [('idp-session', 401), (None, 401), ('different-session', 303)])
+async def test_logout_during_callback_does_not_resurrect_session(client, oidc, monkeypatch, logout_sid, expected):
+    from datetime import timedelta
+    from gateway import db
+    original = auth.oidc_json
+    oidc['claims'] = {'sid': 'idp-session'}
+
+    async def exchange_with_logout(url, **kwargs):
+        result = await original(url, **kwargs)
+        if url.endswith('/token'):
+            claims = jwt.decode(result['id_token'], options={'verify_signature': False})
+            async with db.transaction() as s:
+                s.add(db.OIDCLogoutReplay(digest='logout', issuer='https://id.example', subject='subject-1',
+                                         sid=logout_sid, issued_at=claims['iat'],
+                                         expires_at=db.now()+timedelta(seconds=600)))
+        return result
+    monkeypatch.setattr(auth, 'oidc_json', exchange_with_logout)
+    state = await start(client, oidc)
+    response = await client.get('/auth/oidc/callback', params={'state': state, 'code': 'code'})
+    assert response.status_code == expected, response.text
+    assert (await client.get('/auth/session')).json()['authenticated'] == (expected == 303)
+
+
+async def test_oidc_token_ages_out_while_waiting_for_writer_gate(client, oidc, monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from gateway import db
+    original = db.transaction
+    clock = {'offset': 0}
+    monkeypatch.setattr(auth, 'time', SimpleNamespace(time=lambda: time.time()+clock['offset'], monotonic=time.monotonic))
+    state = await start(client, oidc)
+    calls = 0
+
+    @asynccontextmanager
+    async def delayed_gate(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        async with original(*args, **kwargs) as session:
+            if calls == 2:  # First consumes state; second creates session.
+                clock['offset'] = 601
+            yield session
+    monkeypatch.setattr(db, 'transaction', delayed_gate)
+    response = await client.get('/auth/oidc/callback', params={'state': state, 'code': 'code'})
+    assert response.status_code == 401, response.text
+    assert not (await client.get('/auth/session')).json()['authenticated']

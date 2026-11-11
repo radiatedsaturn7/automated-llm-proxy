@@ -17,7 +17,7 @@ async def cleanup(*, apply=False, batch_size=1000):
     targets = [
         (db.OIDCState, db.OIDCState.digest, db.OIDCState.expires_at < cutoff),
         (db.BrowserSession, db.BrowserSession.digest, db.BrowserSession.expires_at < cutoff),
-        (db.RateBucket, db.RateBucket.id, func.substr(db.RateBucket.id, -12) < bucket_cutoff),
+        (db.RateBucket, db.RateBucket.id, func.substr(db.RateBucket.id, func.length(db.RateBucket.id) - 11) < bucket_cutoff),
     ]
     counts = {}
     async with db.transaction() as session:

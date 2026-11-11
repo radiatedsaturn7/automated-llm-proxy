@@ -20,7 +20,7 @@ def valid_secret(value):
 
 
 class CredentialJournal:
-    def __init__(self, directory, central_url, initial_credential):
+    def __init__(self, directory, central_url, initial_credential, *, enrollment_name=None):
         self.dirfd = self.lockfd = None
         self.central_url = central_url.rstrip("/")
         try:
@@ -47,10 +47,16 @@ class CredentialJournal:
             try:
                 statefd = self._open("state.json", os.O_RDONLY)
             except FileNotFoundError:
+                if enrollment_name is not None:
+                    if not isinstance(enrollment_name, str) or not 1 <= len(enrollment_name) <= 120:
+                        raise RotationError("Invalid enrollment device name")
+                    initial_credential = "lg_" + secrets.token_urlsafe(32)
                 if not valid_secret(initial_credential):
                     raise RotationError("Initial agent root credential required") from None
                 self.state = {"version": 1, "central_url": self.central_url, "current": initial_credential,
                               "pending": None, "last_rotated": time.time(), "key_id": None}
+                if enrollment_name is not None:
+                    self.state["enrollment"] = {"request_id": str(uuid.uuid4()), "device_name": enrollment_name}
                 self._write(self.state)
             else:
                 try:
@@ -80,6 +86,12 @@ class CredentialJournal:
                 or not valid_secret(state.get("current")) or not isinstance(state.get("last_rotated"), (int, float))
                 or not 0 <= state["last_rotated"] < 10**12):
             raise RotationError("Invalid journal or gateway mismatch")
+        enrollment = state.get("enrollment")
+        if enrollment is not None:
+            if (not isinstance(enrollment, dict) or not isinstance(enrollment.get("device_name"), str)
+                    or not 1 <= len(enrollment["device_name"]) <= 120
+                    or uuid.UUID(enrollment["request_id"]).version != 4 or state.get("pending") is not None):
+                raise RotationError("Invalid enrollment journal")
         pending = state.get("pending")
         if pending is not None:
             if not isinstance(pending, dict) or not valid_secret(pending.get("credential")):
@@ -128,6 +140,8 @@ class CredentialJournal:
                      "key_id": payload["key_id"], "last_rotated": time.time()})
 
     async def credential(self, client, interval):
+        if self.state.get("enrollment") is not None:
+            raise RotationError("Browser enrollment must finish before using relay")
         try:
             if self.state["pending"] is None:
                 if time.time() - self.state["last_rotated"] < interval:

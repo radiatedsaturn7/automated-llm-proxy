@@ -6,12 +6,12 @@ This is a working foundation under active development, **not** a fully enterpris
 |---|---|---|
 | Stateless replicas | External PostgreSQL-backed identity, policy, sessions and accounting | Local SQLite is development-only; external state is essential |
 | Users and teams | Primary and explicit secondary memberships; scoped team administrators; shared user and selected-team budgets | Not arbitrary RBAC; SCIM/OIDC maintain primary membership only; delegated API keys cannot exceed caller limits |
-| Virtual credentials | Explicit inference/admin/account/provisioning permissions, expiry, revocation, rotation, model scopes and rate allowances | Permissions cannot elevate user role; rotation preserves authorization and expiry |
-| Provider abstraction | OpenAI-compatible, Azure OpenAI v1, Anthropic and native Gemini text adapters | Not full vendor API parity; validate supported request types |
+| Virtual credentials | Explicit inference/admin/account/provisioning/team_admin permissions, expiry, revocation, rotation, model scopes and rate allowances | Permissions cannot elevate user role; rotation preserves authorization and expiry |
+| Provider abstraction | OpenAI-compatible, Azure OpenAI v1, Anthropic and native Gemini text adapters | Stateless non-streaming text Responses compatibility; not full vendor API parity; validate supported request types |
 | Spending control | Shared reservations and UTC monthly accounting | Prices operator-maintained; crash reconciliation required; not invoice reconciliation |
 | SSO | OIDC with explicit group mapping and browser sessions | SCIM Users/Groups provisioning subset and explicit offboarding; no SAML, local passwords or IdP certification |
-| Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Member portal manages own existing credentials; no arbitrary delegated team-admin roles |
-| Local relay | Authenticated loopback forwarding and short-lived access-token renewal; opt-in durable agent-secret rollover | Requires protected client journal for rollover; original expiry remains; no provider-key rotation or device flow |
+| Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Member portal manages own existing credentials; delegated team UI supports scoped membership and inference-key administration, not arbitrary custom roles |
+| Local relay | Authenticated loopback forwarding and short-lived access-token renewal; opt-in durable agent-secret rollover | Optional operator-bounded SSO enrollment uses a protected client journal; original expiry remains; no provider-key rotation or claim of RFC 8628 protocol compatibility |
 | Evaluation | Immutable plaintext prompt registry, saved deterministic reports, paired regression gates and opt-in gateway model evaluation CLI | Explicitly saved templates are stored; runner execution can incur provider charges; no LLM judges or quality/safety certification |
 | Deployment | Container and deployment examples for simple and replicated setups | Infrastructure must be supplied/validated; examples are not certification |
 | Audit | Metadata records and actor-bound signed export cursors; bounded browser JSON downloads | No immutable storage or automatic SIEM delivery; exports are fixed windows, not database snapshots |
@@ -28,6 +28,8 @@ The sixth increment merged as `53cd23f`. CI run `43065418836` passed all four jo
 
 Later database/operations and evaluation-runner increments add composite query indexes, bounded pools/deadlines, optional cleanup scheduling, read-only preflight and explicit operator-run model comparisons. Consult each commit's CI checks for its acceptance result; the runner's tests never call paid services.
 
+The ninth increment merged as `0ed13cb`. CI run `43069786191` at head `2f7b8fa` passed all four jobs, including real PostgreSQL, fifteen Chromium cases and twelve Helm tests. This adds explicit multi-team delegation, native Gemini text operations, and opt-in reviewed inbound DLP heuristics. It does not establish full provider API parity or comprehensive sensitive-data detection.
+
 ## Research informing priorities
 
 Reviewed official sources on 2026-11-11. These are capability references, not claims of feature parity, endorsements, copied implementations or promises that every competitor feature is free.
@@ -41,7 +43,7 @@ Reviewed official sources on 2026-11-11. These are capability references, not cl
 ## Recommended next milestones
 
 1. **Assurance before breadth:** PostgreSQL concurrency/load tests, provider contract tests, OIDC interoperability, security assessment, restore drills, schema upgrade/rollback procedures and operational alerting.
-2. **Identity lifecycle:** Expand the tested SCIM subset and real IdP compatibility; add delegated administration, multiple memberships, group-change reconciliation and IdP logout integration. Explicit session revocation already exists.
+2. **Identity lifecycle:** Expand the tested SCIM subset and real IdP compatibility; extend group-change reconciliation and IdP logout integration beyond the implemented delegated administration and explicit multiple memberships. Explicit session revocation already exists.
 3. **Resilience and scale:** Measure pool/lock capacity, exercise circuit breakers under load/chaos, define end-to-end idempotency policy and test regional recovery. Health-aware next-request selection is not safe replay of an ambiguous request.
 4. **Governance:** configurable retention and immutable audit export, data residency, secrets-manager integration, approved guardrail hooks, DLP/redaction and secure plugin boundaries.
 5. **Developer workflows:** Build curated datasets, approval workflows, cost/latency comparisons and an SDK compatibility matrix on the existing prompt versions and offline reports. Paired deterministic gates do not measure general model quality.

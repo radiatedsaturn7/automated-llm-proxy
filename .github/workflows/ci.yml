@@ -64,6 +64,11 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
       - run: pytest -q
+      - name: Disposable PostgreSQL backup and restore acceptance
+        env:
+          DISPOSABLE_RESTORE_DRILL: '1'
+        run: python tests/ops/restore_drill.py
+        timeout-minutes: 10
 
   compose-browser:
     runs-on: ubuntu-24.04

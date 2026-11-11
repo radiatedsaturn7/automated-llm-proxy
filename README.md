@@ -8,17 +8,17 @@ Apache-2.0 LLM gateway with a stateless application tier and external SQL policy
 
 ## Implemented capabilities
 
-- OpenAI-compatible text chat, SSE streaming, embeddings and model discovery; Azure OpenAI v1 and native Anthropic text-chat adapters.
+- OpenAI-compatible text chat, SSE streaming, embeddings and model discovery; Azure OpenAI v1, native Anthropic text-chat and Gemini text adapters; stateless text Responses compatibility.
 - Explicit provider/model aliases and prices, encrypted provider credentials, model allowlists and priority routing.
 - Users, primary and explicit secondary teams, scoped team administration, monthly USD budgets, concurrent reservations and per-key request/token admission limits.
-- Hashed API credentials with explicit inference/admin/account/provisioning permissions, expiration and revocation; rotation preserves scope and expiry.
+- Hashed API credentials with explicit inference/admin/account/provisioning/team_admin permissions, expiration and revocation; rotation preserves scope and expiry.
 - OIDC SSO with PKCE, verified identity tokens, nested group mappings, bounded metadata/JWKS caching, configurable sessions and CSRF protection; explicit identity linking and session revocation.
 - A bounded SCIM Users/Groups subset, administrator console and member self-service portal.
 - Immutable prompt versions, literal variable previews and saved deterministic offline evaluations, without paid evaluation model calls.
 - Metadata audit/usage records, signed-cursor exports, request correlation, protected Prometheus metrics and example dashboards/alerts.
 - Docker Compose, Helm/HA settings, Terraform Helm deployment, serialized migrations and CI checks.
 
-Also implemented: shared per-model provider circuit breakers, opt-in journaled agent-secret rollover, bounded browser export downloads and paired offline regression gates. See the [feature matrix](docs/feature-matrix.md) for verification evidence and limitations.
+Also implemented: shared per-model provider circuit breakers, opt-in SSO-assisted relay enrollment and journaled agent-secret rollover, bounded browser export downloads and paired offline regression gates. See the [feature matrix](docs/feature-matrix.md) for verification evidence and limitations.
 
 **State lives outside gateway replicas**, not nowhere: users, keys, budgets, sessions, audit and provider health need durable shared state. PostgreSQL is required in production; SQLite is single-process development only. Inference bodies/responses are not logged or retained by the gateway. Prompt templates are stored in plaintext only when an administrator explicitly saves them in the registry; protect that database and its backups.
 
@@ -39,7 +39,7 @@ uv run python -m gateway.cli --host 127.0.0.1 --port 8080
 
 Open http://localhost:8080/admin. Use the bootstrap token once to create the first administrator and receive a seven-day admin key. Store that key securely; do not use the bootstrap secret as an API credential. Keep encryption/signing keys stable across restarts and replicas. Create a team/user, configure a provider with a model alias and per-million token USD prices, then create a restricted user key. Provider calls incur your provider's charges.
 
-API documentation: `/docs`. Inference uses `Authorization: Bearer <user-api-key>` and `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`. Never distribute provider keys to end users. A provider base URL includes its API prefix, e.g. `https://api.openai.com/v1` or `https://api.anthropic.com/v1`.
+API documentation: `/docs`. Inference uses `Authorization: Bearer <user-api-key>` and `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`, and the documented text-only `/v1/responses` subset. Never distribute provider keys to end users. A provider base URL includes its API prefix, e.g. `https://api.openai.com/v1` or `https://api.anthropic.com/v1`.
 
 ```sh
 uv run pytest -q
@@ -62,6 +62,9 @@ uv run ruff check .
 - [Multi-team delegation and team administration](docs/team-delegation.md)
 - [Opt-in inbound DLP and source extension boundaries](docs/guardrails.md)
 - [Operational cleanup and recovery](docs/operations.md)
+- [PostgreSQL backup/restore acceptance drill](docs/restore-drill.md)
+- [SSO-assisted relay enrollment](docs/enrollment.md)
+- [Stateless text Responses API](docs/responses.md)
 - [Architecture and accounting semantics](docs/architecture.md)
 - [Security model and production checklist](docs/security.md)
 - [Feature matrix, research and roadmap](docs/feature-matrix.md)

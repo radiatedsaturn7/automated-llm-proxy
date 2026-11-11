@@ -37,7 +37,7 @@ def validate_payload(payload, endpoint):
         if not isinstance(messages, list) or not 1 <= len(messages) <= 1000:
             raise HTTPException(400, "Messages required")
         for m in messages:
-            if not isinstance(m, dict) or m.get("role") not in {"system", "developer", "user", "assistant", "tool"}:
+            if not isinstance(m, dict) or not isinstance(m.get("role"), str) or m.get("role") not in {"system", "developer", "user", "assistant", "tool"}:
                 raise HTTPException(400, "Invalid message")
             if set(m) - {"role", "content", "name", "tool_calls", "tool_call_id"}:
                 raise HTTPException(400, "Unsupported message fields")

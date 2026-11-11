@@ -111,3 +111,12 @@ guardrails:
   action: block
   detectors: [secrets, private_key]
   maxCharacters: 262144
+
+# Opt-in SSO approval of locally generated inference-only relay credentials.
+enrollment:
+  enabled: false
+  allowedModels: [] # Required finite aliases when enabled; no wildcard grants.
+  keyDays: 30
+  rpm: 60
+  tpm: 100000
+  maxPending: 1000

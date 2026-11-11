@@ -15,7 +15,13 @@ async def fixtures(client, admin_headers):
         result = await client.post(
             "/admin/api/keys",
             headers=admin_headers,
-            json={"name": name, "user_id": user["id"], "allowed_models": ["chat"], "rpm": 5},
+            json={
+                "name": name,
+                "user_id": user["id"],
+                "allowed_models": ["chat"],
+                "rpm": 5,
+                "permissions": ["inference", "account"],
+            },
         )
         keys.append(result.json())
     return user, keys

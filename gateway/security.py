@@ -86,10 +86,34 @@ async def identify(request: Request, allow_session=False):
         return Identity(user, key, browser_session)
 
 
+def require_permission(identity, permission):
+    if identity.key:
+        effective = ["inference"] if identity.key.kind == "agent" else identity.key.permissions
+        if not isinstance(effective, list) or permission not in effective:
+            raise HTTPException(403, "Credential permission required: " + permission)
+
+
+async def inference_identity(request: Request):
+    identity = await identify(request)
+    require_permission(identity, "inference")
+    return identity
+
+
+async def provisioning(request: Request):
+    identity = await identify(request, allow_session=True)
+    if identity.user.role != "admin":
+        raise HTTPException(403, "Administrator owner required for provisioning")
+    if identity.key and (identity.key.kind == "agent" or not isinstance(identity.key.permissions, list)
+                         or not {"admin", "provisioning"}.intersection(identity.key.permissions)):
+        raise HTTPException(403, "Provisioning credential required")
+    return identity
+
+
 async def admin(request: Request):
     identity = await identify(request, allow_session=True)
     if identity.user.role != "admin":
         raise HTTPException(403, "Administrator role required")
+    require_permission(identity, "admin")
     # Local relays are data-plane credentials, never administrator credentials.
     if identity.key and identity.key.kind == "agent":
         raise HTTPException(403, "Agent tokens cannot administer gateway")
@@ -97,6 +121,7 @@ async def admin(request: Request):
 
 
 def new_key(user_id, team_id, name, expires_in_days=30, kind="api", **policy):
+    policy.setdefault("permissions", ["inference"])
     raw = "lg_" + secrets.token_urlsafe(32)
     key = db.APIKey(name=name, prefix=raw[:11], digest=digest(raw), user_id=user_id, team_id=team_id,
                     kind=kind, expires_at=db.now() + timedelta(days=expires_in_days), **policy)

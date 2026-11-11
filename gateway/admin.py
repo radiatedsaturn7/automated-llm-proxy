@@ -36,7 +36,7 @@ async def bootstrap(body: schemas.Bootstrap):
         user = db.User(email=body_user.email, role="admin")
         s.add(user)
         await s.flush()
-        raw, key = new_key(user.id, None, "bootstrap-admin", expires_in_days=7)
+        raw, key = new_key(user.id, None, "bootstrap-admin", expires_in_days=7, permissions=["admin", "inference", "account", "provisioning"])
         s.add(key)
         await db.audit(s, user.id, "bootstrap", user.id)
         return {"user_id": user.id, "key": raw, "expires_at": key.expires_at}
@@ -157,7 +157,7 @@ async def create_key(body: schemas.KeyCreate, identity: Identity = Depends(admin
         if body.team_id is not None and body.team_id != user.team_id:
             raise HTTPException(400, "Key team must match user team")
         raw, key = new_key(user.id, user.team_id, body.name, body.expires_in_days, body.kind,
-                           allowed_models=body.allowed_models, rpm=body.rpm, tpm=body.tpm)
+                           permissions=body.permissions, allowed_models=body.allowed_models, rpm=body.rpm, tpm=body.tpm)
         s.add(key)
         await s.flush()
         await db.audit(s, identity.user.id, "key.create", key.id, kind=key.kind)
@@ -185,7 +185,7 @@ async def rotate_key(key_id: str, identity: Identity = Depends(admin)):
         if aware(key.expires_at) <= db.now():
             raise HTTPException(400, "Cannot rotate expired key")
         raw, replacement = new_key(key.user_id, key.team_id, key.name, kind=key.kind,
-                                    allowed_models=key.allowed_models, rpm=key.rpm, tpm=key.tpm)
+                                    permissions=key.permissions, allowed_models=key.allowed_models, rpm=key.rpm, tpm=key.tpm)
         replacement.expires_at = key.expires_at  # Rotation never silently extends authorization.
         key.revoked = True
         s.add(replacement)

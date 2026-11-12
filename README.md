@@ -3,7 +3,7 @@
 [![CI on main](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/workflows/ci.yml?query=branch%3Amain+event%3Apush)
 [![License: Apache-2.0](https://img.shields.io/github/license/radiatedsaturn7/automated-llm-proxy)](LICENSE)
 
-[Security model](docs/security.md) · [Release evidence and limitations](docs/release-evidence.md)
+[Security model](docs/security.md) · [Release evidence and limitations](docs/release-evidence.md) · [OpenSSF Scorecard checks](docs/scorecard.md)
 
 Badges report build status and repository licensing, not security certification or regulatory compliance.
 

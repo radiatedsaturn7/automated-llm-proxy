@@ -148,6 +148,27 @@
     } catch (error) { showError(error); }
     finally { button.disabled = false; }
   }
+  async function allowanceAction(userId, button) {
+    const generation = state.generation;
+    button.disabled = true; clearError();
+    try {
+      const path = `/admin/api/users/${encodeURIComponent(userId)}/usage-allowance`;
+      const current = await api(path);
+      if (!state.authenticated || state.view !== 'users' || generation !== state.generation) return;
+      const answer = window.prompt('Daily admitted-request allowance (1–100000000). Blank disables this separate allowance. Dollar budgets and minute rate limits remain enforced.', current.daily_request_limit == null ? '' : String(current.daily_request_limit));
+      if (answer === null) return;
+      const daily = answer.trim() === '' ? null : Number(answer);
+      if (daily !== null && (!Number.isSafeInteger(daily) || daily < 1 || daily > 100000000)) throw new Error('Enter a whole-number daily allowance, or leave blank.');
+      const credits = window.prompt('Monthly self-service reset credits (0–4). Provider usage is NOT free. Changing this setting does not clear consumed credits or requests.', String(current.monthly_reset_limit));
+      if (credits === null) return;
+      const monthly = Number(credits);
+      if (credits.trim() === '' || !Number.isInteger(monthly) || monthly < 0 || monthly > 4) throw new Error('Enter 0–4 monthly reset credits.');
+      if (!window.confirm(`Set daily allowance to ${daily === null ? 'disabled' : daily} requests and monthly reset limit to ${monthly}? Existing usage remains recorded. Real provider costs and hard budgets are unchanged.`)) return;
+      await api(path, {method:'PUT',body:{daily_request_limit:daily,monthly_reset_limit:monthly}});
+      if (state.authenticated && generation === state.generation) message('Usage allowance policy saved. Consumed requests and reset credits were not cleared.');
+    } catch (error) { if (state.authenticated && generation === state.generation) showError(error); }
+    finally { button.disabled = false; }
+  }
   function renderTable(data) {
     const container = $("table-wrap"); container.replaceChildren();
     const rows = records(data);
@@ -178,6 +199,8 @@
           toggle.addEventListener("click", () => updateResource(resource, row.id, { enabled: row.enabled === false }, toggle));
           td.append(toggle);
           if (resource === "users") {
+            const allowance = node('button', 'Usage allowance'); allowance.type = 'button';
+            allowance.addEventListener('click', () => allowanceAction(row.id, allowance)); td.append(allowance);
             const sessions = node("button", "Revoke sessions", "danger"); sessions.type = "button";
             sessions.addEventListener("click", () => sessionAction(row.id, sessions)); td.append(sessions);
             if (!row.identity_linked) {

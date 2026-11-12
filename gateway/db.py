@@ -373,3 +373,14 @@ class LocalMFA(Base):
     pending_seed: Mapped[str | None] = mapped_column(Text, nullable=True)
     password_binding: Mapped[str | None] = mapped_column(String(64), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer)
+
+
+class UserAllowance(Base):
+    __tablename__ = "user_allowances"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    daily_request_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    monthly_reset_limit: Mapped[int] = mapped_column(Integer, default=0)
+    usage_day: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    requests_used: Mapped[int] = mapped_column(Integer, default=0)
+    reset_month: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    reset_operations: Mapped[list] = mapped_column(JSON, default=list)

@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from . import local_mfa  # noqa: F401
 from . import local_auth
-from . import account, admin, agent_rotation, auth, comparisons, db, enrollment, exports, inference, prompts, responses, scim, teams
+from . import account, allowances, admin, agent_rotation, auth, comparisons, db, enrollment, exports, inference, prompts, responses, scim, teams
 from .config import get_settings
 from .observability import ObservabilityMiddleware
 from .overload import OverloadMiddleware
@@ -129,6 +129,7 @@ app.include_router(comparisons.router)
 app.include_router(exports.router)
 app.include_router(prompts.router)
 app.include_router(account.router)
+app.include_router(allowances.router)
 app.include_router(scim.router)
 app.include_router(admin.router)
 app.include_router(auth.router)

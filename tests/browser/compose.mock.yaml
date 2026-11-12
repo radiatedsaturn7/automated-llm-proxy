@@ -23,6 +23,7 @@ services:
     environment:
       ALLOW_PRIVATE_PROVIDER_HOSTS: 'true'
       LOCAL_PASSWORD_ENABLED: 'true'  # Disposable browser acceptance only.
+      PUBLIC_URL: http://127.0.0.1:8080 # Exact Playwright origin for CSRF checks.
     depends_on:
       mock-provider:
         condition: service_healthy

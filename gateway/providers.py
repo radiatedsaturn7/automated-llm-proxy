@@ -29,6 +29,9 @@ async def validate_base_url(value):
 
 
 def upstream_request(provider, route, payload, endpoint):
+    if provider.kind == "bedrock_converse":
+        from .bedrock import request
+        return request(provider, route, payload, endpoint)
     body = dict(payload)
     body["model"] = route["upstream_model"]
     if provider.kind in {"openai", "azure_openai"}:
@@ -376,6 +379,9 @@ def response_headers(response, request_id):
 
 
 def translate_response(provider, data, model, endpoint=None, payload=None):
+    if provider.kind == "bedrock_converse":
+        from .bedrock import response
+        return response(data, model)
     if data.get("error"):
         raise ValueError("Provider returned error object")
     if provider.kind in {"openai", "azure_openai"}:

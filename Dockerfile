@@ -14,10 +14,11 @@ FROM patched-base AS builder
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
 WORKDIR /build
 # Explicit application inputs: unrelated local files must not enter build layers.
-COPY requirements.lock pyproject.toml LICENSE ./
+COPY requirements.lock requirements-build.lock pyproject.toml LICENSE ./
 COPY gateway/ ./gateway/
-RUN python -m pip install --prefix=/install --require-hashes -r requirements.lock \
-    && python -m pip install --prefix=/install --no-deps .
+RUN python -m pip install --require-hashes --only-binary=:all: -r requirements-build.lock \
+    && python -m pip install --prefix=/install --ignore-installed --require-hashes -r requirements.lock \
+    && python -m pip install --prefix=/install --no-deps --no-build-isolation .
 
 FROM patched-base AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \

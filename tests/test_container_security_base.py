@@ -28,8 +28,26 @@ def test_builder_only_copies_declared_application_inputs():
     )[0]
     copies = [line.strip() for line in builder.splitlines() if line.strip().startswith("COPY ")]
     assert copies == [
-        "COPY requirements.lock pyproject.toml LICENSE ./",
+        "COPY requirements.lock requirements-build.lock pyproject.toml LICENSE ./",
         "COPY gateway/ ./gateway/",
     ]
     assert not any(line.strip().startswith("ADD ") for line in dockerfile.splitlines())
     assert 'COPY --from=builder /install /usr/local' in dockerfile
+
+
+def test_build_backend_is_hash_locked_and_not_copied_to_runtime():
+    dockerfile = pathlib.Path("Dockerfile").read_text()
+    assert "pip install --require-hashes --only-binary=:all: -r requirements-build.lock" in dockerfile
+    assert "pip install --prefix=/install --no-deps --no-build-isolation ." in dockerfile
+    assert "pip install --prefix=/install --ignore-installed --require-hashes -r requirements.lock" in dockerfile
+    runtime = dockerfile.split("FROM patched-base AS runtime", 1)[1]
+    assert "COPY --from=builder /install /usr/local" in runtime
+    assert "COPY --from=builder /usr/local" not in runtime
+
+
+def test_build_input_matches_project_backend_requirements():
+    import tomllib
+    metadata = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+    requirements = [line for line in pathlib.Path("requirements-build.in").read_text().splitlines()
+                    if line and not line.startswith("#")]
+    assert requirements == metadata["build-system"]["requires"]

@@ -29,6 +29,14 @@ jobs:
         run: |
           uv export --locked --no-dev --no-emit-project --format requirements-txt --no-header > "$RUNNER_TEMP/requirements.lock"
           diff -u requirements.lock "$RUNNER_TEMP/requirements.lock"
+      - name: Validate and audit locked container build dependencies
+        shell: bash
+        run: |
+          uv venv "$RUNNER_TEMP/build-backend"
+          uv pip sync --python "$RUNNER_TEMP/build-backend/bin/python" --require-hashes --only-binary :all: requirements-build.lock
+          uv pip check --python "$RUNNER_TEMP/build-backend/bin/python"
+          uv run --no-sync python -m pip_audit --disable-pip --no-deps -r requirements-build.lock
+          uv build --wheel --no-build-isolation --python "$RUNNER_TEMP/build-backend/bin/python" --out-dir "$RUNNER_TEMP/backend-wheel"
       - run: uv run --no-sync python -m ruff check .
       - run: uv run --no-sync python -m pytest -q
         timeout-minutes: 10
@@ -36,7 +44,7 @@ jobs:
       - name: Record tested dependency inventory
         run: |
           mkdir -p dependency-evidence
-          cp pyproject.toml uv.lock requirements.lock dependency-evidence/
+          cp pyproject.toml uv.lock requirements.lock requirements-build.in requirements-build.lock dependency-evidence/
           uv run --no-sync python -m pip list --format=json > dependency-evidence/installed.json
           printf '%s\n' "$GITHUB_SHA" > dependency-evidence/tested-commit.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

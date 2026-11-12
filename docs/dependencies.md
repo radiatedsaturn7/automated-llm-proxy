@@ -59,7 +59,9 @@ build-backend transitive dependencies. The builder installs this lock before
 installing the project with `--no-build-isolation --no-deps`, so pip cannot
 silently download a newer backend during application installation. Backend
 packages are installed only in the builder, outside `/install`; they are not
-copied into the runtime image.
+copied into the runtime image. Runtime dependencies install with
+`--ignore-installed` so a package also installed for the builder cannot satisfy
+the runtime lock without being copied into `/install`.
 
 Update deliberately with the repository's CI-pinned uv version:
 

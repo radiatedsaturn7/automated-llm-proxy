@@ -39,6 +39,7 @@ def test_build_backend_is_hash_locked_and_not_copied_to_runtime():
     dockerfile = pathlib.Path("Dockerfile").read_text()
     assert "pip install --require-hashes --only-binary=:all: -r requirements-build.lock" in dockerfile
     assert "pip install --prefix=/install --no-deps --no-build-isolation ." in dockerfile
+    assert "pip install --prefix=/install --ignore-installed --require-hashes -r requirements.lock" in dockerfile
     runtime = dockerfile.split("FROM patched-base AS runtime", 1)[1]
     assert "COPY --from=builder /install /usr/local" in runtime
     assert "COPY --from=builder /usr/local" not in runtime

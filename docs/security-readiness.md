@@ -8,7 +8,7 @@ plan before admitting sensitive traffic.
 
 ## Evidence checkpoints
 
-See the [current exact-head evidence ledger](release-evidence.md) for subsequent
+See the [selected exact-head evidence ledger](release-evidence.md) for subsequent
 verified increments and their CI runs. The detailed record below is historical,
 not the current release head.
 

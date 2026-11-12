@@ -2,6 +2,7 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
+  namespace: {{ .Release.Namespace | quote }}
   name: {{ include "gateway.fullname" . | trunc 42 | trimSuffix "-" }}-cleanup
 spec:
   schedule: {{ .Values.maintenance.schedule | quote }}

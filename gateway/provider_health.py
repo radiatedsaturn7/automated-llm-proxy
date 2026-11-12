@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -22,8 +22,7 @@ class Ticket:
 
 async def clock(session):
     # Use the shared database clock, not the clock of the admitting replica.
-    value = await session.scalar(select(func.clock_timestamp() if db.engine.dialect.name == 'postgresql' else func.current_timestamp()))
-    return aware(value)
+    return await db.database_now(session)
 
 
 async def locked_health(session, provider_id, model, now):

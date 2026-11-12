@@ -127,7 +127,7 @@ async def inspect(body: Operation, identity: Identity = Depends(browser)):
         if row.state == "pending" and row.policy != policy(settings):
             raise HTTPException(409, "Enrollment policy changed; start a new request")
         member_teams = select(db.TeamMembership.team_id).where(db.TeamMembership.user_id == user.id)
-        teams = (await s.scalars(select(db.Team).where(db.Team.enabled.is_(True), or_(
+        teams = (await s.scalars(select(db.Team).where(db.Team.enabled.is_(True), db.Team.deleted_at.is_(None), or_(
             db.Team.id == user.team_id, db.Team.id.in_(member_teams))).order_by(db.Team.id).limit(1000))).all()
         return {**public(row), "teams": [{"id": t.id, "name": t.name} for t in teams]}
 

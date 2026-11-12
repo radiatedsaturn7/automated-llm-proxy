@@ -36,7 +36,7 @@ async def active(session, key):
         raise HTTPException(401, "Agent identity unavailable")
     if key.team_id:
         team = await session.get(db.Team, key.team_id)
-        if not team or not team.enabled:
+        if not team or not team.enabled or team.deleted_at is not None:
             raise HTTPException(403, "Agent team unavailable")
 
 

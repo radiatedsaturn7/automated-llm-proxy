@@ -18,6 +18,10 @@ def micros(value):
 def record(item):
     hidden = {"digest", "encrypted_key", "oidc_subject"}
     data = {column.name: getattr(item, column.name) for column in item.__table__.columns if column.name not in hidden}
+    if isinstance(item, db.Team) and item.deleted_at is not None:
+        data["name"] = item.deleted_name
+        data["scim_external_id"] = item.deleted_external_id
+        data["enabled"] = False
     if isinstance(item, db.User):
         data["identity_linked"] = bool(item.oidc_subject)
     if "budget_micros" in data:
@@ -44,7 +48,7 @@ async def bootstrap(body: schemas.Bootstrap):
 
 @router.get("/admin/api/{resource}")
 async def list_resource(resource: str, identity: Identity = Depends(admin),
-                        limit: int = Query(default=100, ge=1, le=1000), offset: int = Query(default=0, ge=0)):
+                        limit: int = Query(default=100, ge=1, le=1000), offset: int = Query(default=0, ge=0), include_deleted: bool = False):
     models = {"teams": db.Team, "users": db.User, "providers": db.Provider, "keys": db.APIKey,
               "usage": db.Usage, "audit": db.Audit, "reservations": db.Reservation}
     if resource == "settings":
@@ -56,7 +60,10 @@ async def list_resource(resource: str, identity: Identity = Depends(admin),
     model = models[resource]
     async with db.session_factory() as s:
         order = model.created_at.desc() if hasattr(model, "created_at") else model.id
-        rows = (await s.scalars(select(model).order_by(order).offset(offset).limit(limit))).all()
+        query = select(model)
+        if model is db.Team and not include_deleted:
+            query = query.where(db.Team.deleted_at.is_(None))
+        rows = (await s.scalars(query.order_by(order).offset(offset).limit(limit))).all()
         return [record(x) for x in rows]
 
 
@@ -76,7 +83,7 @@ async def patch_team(team_id: str, body: schemas.TeamPatch, identity: Identity =
     async with db.transaction() as s:
         await revalidate_admin(s, identity)
         team = await s.get(db.Team, team_id)
-        if not team:
+        if not team or team.deleted_at is not None:
             raise HTTPException(404, "Team not found")
         if "budget_usd" in body.model_fields_set:
             team.budget_micros = micros(body.budget_usd)
@@ -90,8 +97,10 @@ async def patch_team(team_id: str, body: schemas.TeamPatch, identity: Identity =
 async def create_user(body: schemas.UserCreate, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
         await revalidate_admin(s, identity)
-        if body.team_id and not await s.get(db.Team, body.team_id):
-            raise HTTPException(404, "Team not found")
+        if body.team_id:
+            team = await s.get(db.Team, body.team_id)
+            if not team or team.deleted_at is not None:
+                raise HTTPException(404, "Team not found")
         user = db.User(email=body.email, team_id=body.team_id, role=body.role, budget_micros=micros(body.budget_usd))
         s.add(user)
         await s.flush()

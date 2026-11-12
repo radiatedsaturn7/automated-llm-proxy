@@ -99,7 +99,6 @@ async def test_primary_removal_clears_duplicate_not_unrelated(client, admin_head
     denied = await client.post('/admin/api/keys', headers=admin_headers,
         json={'name':'no-new-access', 'user_id':user['id'], 'team_id':gid})
     assert denied.status_code == 400
-    assert (await client.delete(path, headers=admin_headers)).status_code == 405
 
 
 async def test_disabled_and_uniqueness_failure_preserve_membership(client, admin_headers):

@@ -198,6 +198,8 @@ async def list_resources(kind: str, request: Request):
     if start < 1 or count < 0 or count > 100:
         fail("startIndex must be positive and count between 0 and 100")
     query = select(model)
+    if model is db.Team:
+        query = query.where(db.Team.deleted_at.is_(None))
     if request.query_params.get("filter"):
         match = re.fullmatch(
             r'(userName|displayName|externalId) eq "([^"\\]{1,320})"', request.query_params["filter"]
@@ -241,7 +243,7 @@ async def get_resource(kind: str, resource_id: str):
         fail("Unknown resource type", 404)
     async with db.session_factory() as session:
         resource = await session.get(db.User if kind == "Users" else db.Team, resource_id)
-        if not resource:
+        if not resource or (kind == "Groups" and resource.deleted_at is not None):
             fail("Resource not found", 404)
         return user_resource(resource) if kind == "Users" else await group_resource(session, resource)
 
@@ -455,7 +457,7 @@ async def replace_group(resource_id: str, request: Request, identity: Identity =
     async with db.transaction() as session:
         await revalidate_provisioning(session, identity)
         group = await session.get(db.Team, resource_id)
-        if not group:
+        if not group or group.deleted_at is not None:
             fail("Resource not found", 404)
         await protected_group(session, group)
         if not group.enabled:
@@ -464,6 +466,41 @@ async def replace_group(resource_id: str, request: Request, identity: Identity =
         await set_members(session, group, body.get("members", []))
         await db.audit(session, identity.user.id, "scim.group.replace", group.id)
         return await group_resource(session, group)
+
+
+@router.delete("/Groups/{resource_id}", status_code=204)
+async def delete_group(resource_id: str, identity: Identity = Depends(provisioning)):
+    async with db.transaction() as session:
+        await revalidate_provisioning(session, identity)
+        group = await session.get(db.Team, resource_id)
+        if not group:
+            fail("Resource not found", 404)
+        if group.deleted_at is not None:
+            return Response(status_code=204)
+        await protected_group(session, group)
+        # Use subqueries before changing membership. No unbounded Python ID list.
+        primary = select(db.User.id).where(db.User.team_id == group.id)
+        secondary = select(db.TeamMembership.user_id).where(db.TeamMembership.team_id == group.id)
+        await session.execute(delete(db.BrowserSession).where(
+            db.BrowserSession.user_id.in_(primary) | db.BrowserSession.user_id.in_(secondary)))
+        # Primary reassignment retains existing conservative all-key revocation.
+        await session.execute(update(db.APIKey).where(
+            db.APIKey.user_id.in_(primary) | (db.APIKey.team_id == group.id)).values(revoked=True))
+        await session.execute(delete(db.TeamMembership).where(db.TeamMembership.team_id == group.id))
+        await session.execute(update(db.User).where(db.User.team_id == group.id).values(team_id=None))
+        # Preserve original values for historical admin reads while releasing live
+        # uniqueness. No globally reserved prefix and no physical row deletion.
+        for _ in range(10):
+            internal_name = "deleted-" + db.uid()
+            if not await session.scalar(select(db.Team.id).where(db.Team.name == internal_name)):
+                break
+        else:
+            fail("Unable to allocate deletion marker", 409)
+        group.deleted_name, group.deleted_external_id = group.name, group.scim_external_id
+        group.name, group.scim_external_id = internal_name, None
+        group.enabled, group.deleted_at = False, db.now()
+        await db.audit(session, identity.user.id, "scim.group.delete", group.id)
+    return Response(status_code=204)
 
 
 @router.put("/Users/{resource_id}")
@@ -499,7 +536,7 @@ async def patch_group(resource_id: str, request: Request, identity: Identity = D
     async with db.transaction() as session:
         await revalidate_provisioning(session, identity)
         group = await session.get(db.Team, resource_id)
-        if not group:
+        if not group or group.deleted_at is not None:
             fail("Resource not found", 404)
         await protected_group(session, group)
         if not group.enabled:

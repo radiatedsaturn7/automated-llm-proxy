@@ -31,7 +31,7 @@ async def authorize(s, identity, team_id):
     user = identity.user
     permissions = identity.key.permissions if identity.key else None
     team = await s.get(db.Team, team_id)
-    if not team or not team.enabled:
+    if not team or not team.enabled or team.deleted_at is not None:
         raise HTTPException(404, "Active team not found")
     if global_admin:
         return True
@@ -162,7 +162,7 @@ async def rotate(team_id: str, key_id: str, identity: Identity = Depends(caller)
 async def managed_teams(identity: Identity = Depends(caller)):
     async with db.transaction(inference=True) as s:
         global_admin = await authorize_actor(s, identity)
-        query = select(db.Team).where(db.Team.enabled.is_(True))
+        query = select(db.Team).where(db.Team.enabled.is_(True), db.Team.deleted_at.is_(None))
         if not global_admin:
             if identity.key and "team_admin" not in identity.key.permissions:
                 return []

@@ -21,6 +21,11 @@ mountedSecrets:
 localPassword:
   enabled: false
   mfaPolicy: optional # Set required when all local users must enroll before sign-in.
+# AKS workload identity: opt in only after configuring federated identity and RBAC.
+# Annotate serviceAccount with azure.workload.identity/client-id using annotations above.
+azureWorkloadIdentity:
+  enabled: false
+  allowedEndpoints: [] # Exact public Azure URLs, e.g. https://RESOURCE.openai.azure.com/openai/v1.
 environment: production
 publicUrl: https://gateway.example.com
 providerTimeoutSeconds: 120 # Per-read/connect request timeout; not total stream duration.

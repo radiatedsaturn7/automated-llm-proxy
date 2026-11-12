@@ -26,7 +26,7 @@
     ],
     providers: [
       { name: "name", label: "Provider name", required: true },
-      { name: "kind", label: "Adapter", options: ["openai", "anthropic", "azure_openai", "gemini", "bedrock_converse"], value: "openai", help: "Bedrock Converse supports native text chat without streaming; use a regional bedrock-runtime HTTPS origin and a Bedrock bearer API key. IAM/SigV4 is not supported by this adapter." },
+      { name: "kind", label: "Adapter", options: ["openai", "anthropic", "azure_openai", "gemini", "bedrock_converse", "azure_openai_workload_identity"], value: "openai", help: "Bedrock Converse supports native text chat without streaming; use a regional bedrock-runtime HTTPS origin and a Bedrock bearer API key. IAM/SigV4 is not supported by this adapter. Azure workload identity requires deployment opt-in and an allowed Azure endpoint; no API key is submitted." },
       { name: "base_url", label: "Trusted provider base URL", type: "url", required: true, value: "https://api.openai.com/v1" },
       { name: "api_key", label: "Provider API key", type: "password", required: true, help: "Stored encrypted by the gateway. Use only credentials approved for this deployment." },
       { name: "models", label: "Model aliases and prices (JSON object)", type: "json", required: true, value: '{"example-model":{"upstream_model":"provider-model-id","input_cost_per_million":1,"output_cost_per_million":3}}', help: "Replace the example with a real provider model and current prices. Prices are not automatically discovered." },
@@ -341,6 +341,17 @@
       if (field.help) { const help = node("small", field.help); help.id = `${id}-help`; input.setAttribute("aria-describedby", help.id); wrap.append(help); }
       form.append(wrap);
     });
+    if (state.view === "providers") {
+      const adapter = form.elements.namedItem("kind");
+      const key = form.elements.namedItem("api_key");
+      const updateCredentialMode = () => {
+        const identity = adapter.value === "azure_openai_workload_identity";
+        key.required = !identity; key.disabled = identity;
+        if (identity) key.value = "";
+      };
+      adapter.addEventListener("change", updateCredentialMode);
+      updateCredentialMode();
+    }
     const button = node("button", "Create"); button.type = "submit"; form.append(button);
   }
   async function loadView(rebuild = false) {
@@ -554,6 +565,7 @@
         const input = event.target.elements.namedItem(field.name);
         payload[field.name] = field.type === "checkbox" ? input.checked : field.type === "json" ? JSON.parse(input.value) : field.type === "number" ? Number(input.value) : input.value.trim();
       });
+      if (view === "providers" && payload.kind === "azure_openai_workload_identity") delete payload.api_key;
       if (payload.team_id === "") payload.team_id = null;
       const data = await api(`/admin/api/${view}`, { method: "POST", body: payload });
       // Clear provider secrets before any further asynchronous work.

@@ -53,6 +53,11 @@ cases and a relay assertion. The assertion was replaced with an explicit 502
 invariant guard, retained under optimized Python. The final gated scan has zero
 unsuppressed findings. This records triage, not a blanket baseline waiver.
 
+The Azure workload-identity integration adds one B110 exception in
+`azure_identity.py`: bounded credential teardown must not prevent subsequent
+HTTP/DB shutdown or log SDK secrets. This brings the reviewed exceptions to six;
+the original pre-Azure scan history above remains unchanged.
+
 ## Reproduce
 
 ```sh

@@ -180,3 +180,18 @@ streamed tool merely because argument fragments arrived: require a successful
 terminal `tool_calls` finish. Buffered output DLP restrictions remain unchanged.
 Offline tests cover both translation and actual gateway single-dispatch settlement;
 this is not a claim of testing every live Anthropic model/version.
+
+### Request encoding and pre-dispatch failures
+
+Chat, embeddings and stateless Responses requests require UTF-8 JSON. The gateway
+rejects duplicate object keys, NaN/Infinity, overflowing floating-point literals,
+unpaired Unicode surrogates and nesting deeper than 64 levels with 400. Valid
+Unicode, including escaped surrogate pairs, remains supported. This validation
+applies recursively, including nested tool schemas and Responses input.
+
+The final provider request is built and serialized before budget/rate reservation.
+A local encoding/build failure cannot charge usage or count as an upstream circuit
+failure. Any half-open probe is abandoned, with cancellation-safe retained cleanup
+and lease expiry as a fallback if cleanup fails. Once transport dispatch begins,
+failures may be ambiguous and retain existing conservative accounting; this is
+not a promise that every network error is free.

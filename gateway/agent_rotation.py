@@ -40,11 +40,37 @@ async def active(session, key):
             raise HTTPException(403, "Agent team unavailable")
 
 
+async def preflight(hashed, *, operation=None):
+    """Reject invalid proofs without joining the cluster-wide writer queue.
+
+    This read is only an availability filter, never an authorization snapshot.
+    Callers repeat all checks in a fresh session under the exclusive policy gate.
+    Commit accepts both a pending candidate and the committed recovery secret.
+    """
+    async with db.session_factory() as session:
+        key = await session.scalar(select(db.APIKey).where(db.APIKey.digest == hashed))
+        if operation is None or key is not None:
+            await active(session, key)
+            if operation is not None and key.last_rotation_operation != operation:
+                raise HTTPException(409, "No matching committed operation")
+            return
+        pending = await session.scalar(select(db.AgentRotation).where(db.AgentRotation.pending_digest == hashed))
+        if not pending or pending.operation_id != operation:
+            raise HTTPException(401, "Pending credential not recognized")
+        key = await session.get(db.APIKey, pending.key_id)
+        await active(session, key)
+        if aware(pending.expires_at) <= db.now():
+            raise HTTPException(410, "Pending rotation expired")
+        if pending.generation != key.generation:
+            raise HTTPException(409, "Agent generation changed")
+
+
 @router.post("/prepare")
 async def prepare(body: Prepare, request: Request):
     root = bearer(request)
     operation = str(body.operation_id)
     pending_digest = digest(body.next_credential)
+    await preflight(digest(root))
     async with db.transaction() as session:
         key = await session.scalar(select(db.APIKey).where(db.APIKey.digest == digest(root)))
         await active(session, key)
@@ -82,6 +108,7 @@ async def commit(body: Operation, request: Request):
     candidate = bearer(request)
     hashed = digest(candidate)
     operation = str(body.operation_id)
+    await preflight(hashed, operation=operation)
     async with db.transaction() as session:
         # A lost commit response is recovered using the newly current secret.
         key = await session.scalar(select(db.APIKey).where(db.APIKey.digest == hashed))

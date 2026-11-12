@@ -1,5 +1,6 @@
 """Stateless, text-only Responses compatibility over the normal chat pipeline."""
 import json
+import re
 import time
 import uuid
 
@@ -28,17 +29,39 @@ def chat_payload(payload):
         messages.append({'role': 'user', 'content': content})
     elif isinstance(content, list) and 1 <= len(content) <= 999:
         for item in content:
-            if (not isinstance(item, dict) or set(item) - {'role', 'content', 'type'}
+            if (not isinstance(item, dict) or set(item) - {'role', 'content', 'type', 'id', 'status', 'phase'}
                     or item.get('type', 'message') != 'message'
                     or not isinstance(item.get('role'), str) or item.get('role') not in {'user', 'assistant', 'system', 'developer'}):
                 raise HTTPException(400, 'Responses input supports text messages only')
+            output_item = 'id' in item or 'status' in item or 'phase' in item
+            if output_item:
+                if (item['role'] != 'assistant' or item.get('type') != 'message'
+                        or ('id' in item and (not isinstance(item['id'], str)
+                            or not re.fullmatch(r'msg_[A-Za-z0-9_-]{1,124}', item['id'])))
+                        or ('status' in item and item['status'] not in ('completed', 'incomplete'))
+                        or item.get('phase') is not None):
+                    raise HTTPException(400, 'Invalid inert Responses output metadata')
             text = item.get('content')
-            if isinstance(text, list) and 1 <= len(text) <= 100:
+            if isinstance(text, list) and (1 <= len(text) <= 100 or (output_item and not text)):
                 parts = []
                 for part in text:
-                    expected = {'input_text', 'output_text'} if item['role'] == 'assistant' else {'input_text'}
-                    if (not isinstance(part, dict) or set(part) != {'type', 'text'}
-                            or not isinstance(part.get('type'), str) or part.get('type') not in expected or not isinstance(part.get('text'), str)):
+                    if not isinstance(part, dict):
+                        raise HTTPException(400, 'Responses content supports text parts only')
+                    kind = part.get('type')
+                    if kind == 'refusal' and item['role'] == 'assistant':
+                        if set(part) != {'type', 'refusal'} or not isinstance(part.get('refusal'), str):
+                            raise HTTPException(400, 'Invalid Responses refusal history')
+                        parts.append(part['refusal'])
+                        continue
+                    allowed_part = {'type', 'text'}
+                    if kind == 'output_text' and item['role'] == 'assistant':
+                        allowed_part |= {'annotations', 'logprobs'}
+                        if ('annotations' in part and part['annotations'] != []
+                                or 'logprobs' in part and part['logprobs'] is not None and part['logprobs'] != []):
+                            raise HTTPException(400, 'Responses annotations and logprobs are unsupported')
+                    elif kind != 'input_text':
+                        raise HTTPException(400, 'Responses content supports text parts only')
+                    if set(part) - allowed_part or not isinstance(part.get('text'), str):
                         raise HTTPException(400, 'Responses content supports text parts only')
                     parts.append(part['text'])
                 text = ''.join(parts)

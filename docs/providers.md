@@ -160,3 +160,23 @@ changes or disables the provider immediately afterward. This does not forcibly
 cancel dispatched work, roll back provider billing or guarantee credential
 revocation at an external provider. All configuration writers must use the
 control-plane policy gate; out-of-band SQL that ignores it is unsupported.
+
+
+### Anthropic refusal and context-window terminal states
+
+The native adapter explicitly maps `refusal` to Chat Completions
+`finish_reason: content_filter`, and `model_context_window_exceeded` to `length`,
+per [Anthropic's stop-reason contract](https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons).
+These are terminal outcomes, not transport failures. Nonstream refusal text is
+returned in `message.refusal` with null content and no executable tool calls;
+provider `stop_details` metadata is not forwarded. Reported usage remains accounted
+for. Other unsupported reasons, including server-tool `pause_turn`, still fail
+closed. No automatic fallback, continuation or retry is introduced.
+
+Streaming already-emitted text or tool deltas cannot be retracted when a later
+refusal arrives. The final chunk reports `content_filter` or `length` and final
+usage, followed by the normal completion sentinel. Consumers must not execute a
+streamed tool merely because argument fragments arrived: require a successful
+terminal `tool_calls` finish. Buffered output DLP restrictions remain unchanged.
+Offline tests cover both translation and actual gateway single-dispatch settlement;
+this is not a claim of testing every live Anthropic model/version.

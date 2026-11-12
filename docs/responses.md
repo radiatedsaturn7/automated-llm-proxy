@@ -22,8 +22,15 @@ Accepted fields: `model`, `input`, optional text `instructions`, `max_output_tok
 **false**, intentionally unlike a stateful Responses service. Missing output limit
 uses the chat endpoint's 512-token default. Inputs may be a string or 1–999 text
 messages with user/assistant/system/developer roles. Text content parts use
-`input_text`; assistant history may also use `output_text`. No item IDs or references
-are accepted. Instructions become a system message. Standard body size, message
+`input_text`; assistant history may also use `output_text`. Assistant output messages can be supplied directly as client-owned history, including
+SDK-serialized output items: `type: message`, optional inert `msg_` ID (at most 128
+characters), terminal `status` (`completed`/`incomplete`), and SDK-default null
+`phase`. Output text permits only empty `annotations` and absent/null/empty
+`logprobs`; nonempty metadata is rejected. IDs are validated and discarded, never
+looked up. Assistant refusal parts are preserved as assistant-history text through
+the text chat pipeline, so DLP and accounting still inspect them. This does not
+preserve a provider-specific refusal discriminator in history. No item references
+or stored-state retrieval are accepted. Instructions become a system message. Standard body size, message
 count, model access, credential scope, rate and token limits, DLP, budgets, provider
 health and conservative accounting all apply. Nothing bypasses admission, and
 there is exactly one reservation and provider dispatch.
@@ -49,3 +56,11 @@ Normal gateway accounting/audit metadata remains, and upstream providers may hav
 their own retention policies: `store:false` is not a promise of provider-side zero
 retention. This is not full Responses API or Agents SDK parity. Tests use simulated
 providers through real ASGI routes, never paid API calls.
+
+
+For client-owned history, append `response.output` (or SDK items serialized with
+`model_dump()`) to the input list, then append the next user message. This is
+stateless replay of the supplied text, not server-side conversation storage. Empty
+assistant output from a filtered response is represented as empty assistant text.
+Incomplete outputs remain incomplete history; the gateway does not resume a prior
+provider operation. Streaming, tools and annotations remain outside this subset.

@@ -22,7 +22,7 @@ acceptance tests exercise actual gateway processes and a TLS mock provider.
 | `chat.completions.create` | Text chat, `max_completion_tokens`, typed choices and usage, raw response/request and reservation IDs |
 | Streaming chat | SDK async stream iteration, content chunks, finish event, final usage chunk and completion sentinel |
 | `embeddings.create` | Float vectors and SDK default base64 negotiation/automatic decoding; token accounting |
-| `responses.create` | Stateless text, instructions, `store=False`, `output_text`, completion status and usage |
+| `responses.create` | Stateless text, instructions, `store=False`, `output_text`, completion status and usage; two-turn client-owned output-item history |
 | Local failures | SDK `AuthenticationError` (401), `RateLimitError` (429 budget), `BadRequestError` (400 unsupported stateful Responses); no upstream dispatch |
 | Upstream failure | Sanitized SDK `InternalServerError` (502), one dispatch, conservative estimated accounting |
 

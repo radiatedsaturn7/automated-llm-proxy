@@ -126,3 +126,63 @@ async def test_original_body_bound_and_provider_error(client, admin_headers, mon
     response = await client.post('/v1/responses', headers=headers, json={'model': 'chat', 'input': 'hi'})
     assert response.status_code == 429 and 'secret-provider-message' not in response.text
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize(
+    "finish,refusal", [("stop", None), ("length", None), ("content_filter", "Cannot comply")]
+)
+def test_output_items_roundtrip(finish, refusal):
+    original = chat_response(finish)
+    if refusal:
+        original["choices"][0]["message"] = {"content": None, "refusal": refusal}
+    output = response_envelope(original, "chat")["output"]
+    request = chat_payload({"model": "chat", "input": output + [{"role": "user", "content": "continue"}]})
+    assert request["messages"][0] == {"role": "assistant", "content": refusal or "answer"}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"id": "file_x"},
+        {"id": {}},
+        {"status": "in_progress"},
+        {"status": {}},
+        {"role": "user"},
+        {"content": [{"type": "output_text", "text": "x", "annotations": [{"type": "url_citation"}]}]},
+        {"content": [{"type": "output_text", "text": "x", "logprobs": [{"token": "x"}]}]},
+        {"content": [{"type": "refusal", "refusal": 42}]},
+        {"encrypted_content": "x"},
+    ],
+)
+async def test_invalid_history_metadata_rejected_before_dispatch(client, admin_headers, change):
+    headers, _, _ = await setup_inference(client, admin_headers)
+    await mock_upstream(lambda req: pytest.fail("invalid history dispatched"))
+    item = response_envelope(chat_response(), "chat")["output"][0] | change
+    result = await client.post("/v1/responses", headers=headers, json={"model": "chat", "input": [item]})
+    assert result.status_code == 400
+    async with db.session_factory() as s:
+        assert await s.scalar(select(func.count()).select_from(db.Reservation)) == 0
+
+
+async def test_refusal_history_dlp_not_bypassed(client, admin_headers, monkeypatch):
+    headers, _, _ = await setup_inference(client, admin_headers)
+    monkeypatch.setattr(get_settings(), "guardrails_enabled", True)
+    monkeypatch.setattr(get_settings(), "guardrails_detectors", '["email"]')
+    await mock_upstream(lambda req: pytest.fail("sensitive refusal dispatched"))
+    result = await client.post(
+        "/v1/responses",
+        headers=headers,
+        json={
+            "model": "chat",
+            "input": [
+                {
+                    "role": "assistant",
+                    "type": "message",
+                    "id": "msg_example",
+                    "status": "completed",
+                    "content": [{"type": "refusal", "refusal": "private@example.com"}],
+                }
+            ],
+        },
+    )
+    assert result.status_code == 403

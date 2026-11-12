@@ -140,3 +140,7 @@ enrollment:
   rpm: 60
   tpm: 100000
   maxPending: 1000
+
+# Opt-in strict installation guards; see values-security.yaml.
+securityProfile:
+  enabled: false

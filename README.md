@@ -1,11 +1,12 @@
 # Brrrtgate
 
 [![CI on main](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/workflows/ci.yml?query=branch%3Amain+event%3Apush)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/radiatedsaturn7/automated-llm-proxy/badge)](https://scorecard.dev/viewer/?uri=github.com/radiatedsaturn7/automated-llm-proxy)
 [![License: Apache-2.0](https://img.shields.io/github/license/radiatedsaturn7/automated-llm-proxy)](LICENSE)
 
-[Security model](docs/security.md) · [Release evidence and limitations](docs/release-evidence.md)
+[Security model](docs/security.md) · [Release evidence and limitations](docs/release-evidence.md) · [OpenSSF Scorecard checks](docs/scorecard.md)
 
-Badges report build status and repository licensing, not security certification or regulatory compliance.
+Badges report build status, observable repository security practices and licensing, not security certification or regulatory compliance.
 
 **Brrrrt it into production**
 

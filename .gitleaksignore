@@ -1,0 +1,3 @@
+# Synthetic, deliberately invalid PEM text (body "abc") used by guardrail tests.
+# Exact historical finding only; this does not exempt new commits or other keys.
+2f7b8fa3e7635e18b0b284c5aec565968f7a5097:tests/test_guardrails.py:private-key:25

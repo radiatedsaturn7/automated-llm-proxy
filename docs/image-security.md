@@ -37,8 +37,14 @@ scanned source.
 This inventories detected packages in the final image, including OS packages; it
 is not a source license audit, complete build-toolchain SBOM, proof of absent
 vulnerabilities, independent penetration test, or signed/reproducible build.
-Base image tags remain mutable, so source-identical builds can differ. Retain
+The base image is digest-pinned, but signed APT security updates and build-tool
+resolution can still make source-identical builds differ. Retain
 release evidence beyond the CI artifact window in operator-controlled storage and
 separately identify/sign the actual distributed artifact before making supply-chain
 assurance claims. Findings and SBOMs can reveal package/application metadata; do
 not add secrets, real datasets or local credential files to the build context.
+
+## Current remediation status
+
+See [dated image triage](image-vulnerability-triage.md). The gate remains blocking;
+upstream no-DSA decisions are not blanket exceptions.

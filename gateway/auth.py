@@ -49,7 +49,7 @@ async def exchange(request: Request):
                             "gen": key.generation, "iat": db.now(), "exp": db.now() + timedelta(seconds=lifetime), "jti": db.uid()},
                            get_settings().gateway_signing_key, algorithm="HS256")
         await db.audit(s, user.id, "agent.exchange", key.id)
-    return {"access_token": token, "expires_in": lifetime, "token_type": "Bearer"}
+    return {"access_token": token, "expires_in": lifetime, "token_type": "Bearer"}  # nosec B105 # OAuth token type, not a credential.
 
 
 @router.get("/auth/session")

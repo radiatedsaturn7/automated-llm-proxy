@@ -25,7 +25,7 @@ Keycloak, and deployment checks. Tests use synthetic provider responses and secr
   test filenames. Dependency inventories have bounded artifact retention; preserve
   required release evidence in the operator's controlled records before expiry.
 - The two-replica drill includes graceful drain/deadline cancellation, SIGKILL
-  uncertainty, survivor inference and maintenance-key rotation. It does not simulate
+  uncertainty, survivor inference and master-key rotation. It does not simulate
   managed-database failover, ingress propagation or a multi-region partition.
 - Synthetic provider/SDK contracts do not establish real-vendor billing equivalence,
   all model feature support, general evaluation quality, or performance SLOs.

@@ -92,3 +92,17 @@ immutable/versioned Secret or mount for each rollout, and keep its contents
 stable until every relevant process has started. Kubernetes atomic ..data swaps
 make individual file lookup safe; they do not turn this loader into a coherent
 multi-file hot-rotation protocol.
+
+
+## Container build inputs
+
+The application Dockerfile copies only `requirements.lock`, `pyproject.toml`,
+`LICENSE`, and `gateway/` into its builder. Unrelated root-level local files,
+configuration, database backups and deployment secrets are not copied into
+builder layers. The final image receives only the installed application and
+runtime dependencies. Keep `.dockerignore` exclusions as defense in depth.
+
+This is not permission to build from a directory containing secrets: files can
+still be sent as build context to a remote builder, and anything placed inside
+`gateway/` is an application input. Use a clean checkout and mount installation
+secrets at runtime, never embed them in source, Docker build arguments or images.

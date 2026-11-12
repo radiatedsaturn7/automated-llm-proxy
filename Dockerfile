@@ -13,7 +13,9 @@ RUN test -r /usr/share/keyrings/debian-archive-keyring.pgp \
 FROM patched-base AS builder
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
 WORKDIR /build
-COPY . .
+# Explicit application inputs: unrelated local files must not enter build layers.
+COPY requirements.lock pyproject.toml LICENSE ./
+COPY gateway/ ./gateway/
 RUN python -m pip install --prefix=/install --require-hashes -r requirements.lock \
     && python -m pip install --prefix=/install --no-deps .
 

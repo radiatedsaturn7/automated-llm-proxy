@@ -17,3 +17,19 @@ def test_builder_and_runtime_share_patched_pinned_base():
     assert "ge '1:1.3.dfsg+really1.3.1-1+deb13u1'" in dockerfile
     assert '--allow-unauthenticated' not in dockerfile
     assert 'trusted=yes' not in dockerfile
+
+
+def test_builder_only_copies_declared_application_inputs():
+    # A blacklist cannot anticipate local credentials with arbitrary names.
+    # Keep COPY explicit even when .dockerignore also excludes common secrets.
+    dockerfile = pathlib.Path("Dockerfile").read_text()
+    builder = dockerfile.split("FROM patched-base AS builder", 1)[1].split(
+        "FROM patched-base AS runtime", 1
+    )[0]
+    copies = [line.strip() for line in builder.splitlines() if line.strip().startswith("COPY ")]
+    assert copies == [
+        "COPY requirements.lock pyproject.toml LICENSE ./",
+        "COPY gateway/ ./gateway/",
+    ]
+    assert not any(line.strip().startswith("ADD ") for line in dockerfile.splitlines())
+    assert 'COPY --from=builder /install /usr/local' in dockerfile

@@ -1,6 +1,6 @@
 # Official multi-platform Python 3.12 / Debian 13 image index, verified 2026-11-12.
 # Review this digest and the minimum security package version together on updates.
-FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS patched-base
+FROM python:3.15-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS patched-base
 # DSA-6613-1: do not silently build against the older zlib in the pinned base.
 # APT verifies signed Debian metadata and package hashes with the image keyring.
 RUN test -r /usr/share/keyrings/debian-archive-keyring.pgp \

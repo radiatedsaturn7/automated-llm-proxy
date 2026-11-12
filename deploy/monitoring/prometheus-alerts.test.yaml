@@ -1,0 +1,178 @@
+rule_files:
+- prometheus-alerts.yaml
+evaluation_interval: 1m
+tests:
+- name: low traffic does not page
+  interval: 1m
+  input_series:
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-a",pool="application",reason="inflight"}
+    values: 0+1x15
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-a",pool="operations",reason="inflight"}
+    values: 0+0x15
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+- name: sustained application inflight rejection
+  interval: 1m
+  input_series:
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-a",pool="application",reason="inflight"}
+    values: 0+10x15
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts:
+    - exp_labels:
+        instance: replica-a
+        severity: warning
+      exp_annotations: &id001
+        summary: Brrrtgate is persistently shedding application traffic
+        description: More than 20 application rejections per five minutes on this
+          replica. Inspect rejection reasons, request duration, accounting backlog
+          and database health before changing capacity or scaling.
+  - eval_time: 12m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+- name: accounting rejection and inflight reasons combine
+  interval: 1m
+  input_series:
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-a",pool="application",reason="accounting"}
+    values: 0+3x15
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-a",pool="application",reason="inflight"}
+    values: 0+3x15
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts:
+    - exp_labels:
+        instance: replica-a
+        severity: warning
+      exp_annotations: *id001
+  - eval_time: 12m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+- name: operational exhaustion is separate
+  interval: 1m
+  input_series:
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-a",pool="operations",reason="inflight"}
+    values: 0+3x15
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts:
+    - exp_labels:
+        instance: replica-a
+        severity: warning
+      exp_annotations:
+        summary: Brrrtgate operational HTTP capacity is persistently exhausted
+        description: Health or metrics requests are being rejected on this replica.
+          Check scraping frequency, probe traffic and slow readiness database calls;
+          do not blindly increase application capacity.
+- name: transient burst clears before sustained threshold
+  interval: 1m
+  input_series:
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-a",pool="application",reason="inflight"}
+    values: 0 100 100+0x14
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+- name: other scrape jobs excluded
+  interval: 1m
+  input_series:
+  - series: gateway_overload_rejections_total{job="unrelated",instance="replica-a",pool="application",reason="inflight"}
+    values: 0+100x15
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+- name: small counts on distinct replicas do not aggregate
+  interval: 1m
+  input_series:
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-a",pool="application",reason="inflight"}
+    values: 0+3x15
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-b",pool="application",reason="inflight"}
+    values: 0+3x15
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+- name: restart counter reset still detects sustained rejection
+  interval: 1m
+  input_series:
+  - series: gateway_overload_rejections_total{job="thunderbolt",instance="replica-a",pool="application",reason="inflight"}
+    values: 0+10x5 0+10x10
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ThunderboltApplicationOverload
+    exp_alerts:
+    - exp_labels:
+        instance: replica-a
+        severity: warning
+      exp_annotations: *id001
+  - eval_time: 12m
+    alertname: ThunderboltOperationsOverload
+    exp_alerts: []

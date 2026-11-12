@@ -29,3 +29,19 @@ groups:
         annotations:
           summary: Brrrtgate control-plane p95 latency exceeds two seconds
           description: Check database lock contention and identity provider response time.
+      - alert: ThunderboltApplicationOverload
+        expr: sum by (instance) (increase(gateway_overload_rejections_total{job="thunderbolt",pool="application"}[5m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Brrrtgate is persistently shedding application traffic
+          description: More than 20 application rejections per five minutes on this replica. Inspect rejection reasons, request duration, accounting backlog and database health before changing capacity or scaling.
+      - alert: ThunderboltOperationsOverload
+        expr: sum by (instance) (increase(gateway_overload_rejections_total{job="thunderbolt",pool="operations"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Brrrtgate operational HTTP capacity is persistently exhausted
+          description: Health or metrics requests are being rejected on this replica. Check scraping frequency, probe traffic and slow readiness database calls; do not blindly increase application capacity.

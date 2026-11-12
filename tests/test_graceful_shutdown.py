@@ -144,6 +144,10 @@ def listener_stopped(base):
         return False
     except httpx.ConnectError:
         return True
+    except (httpx.ReadError, httpx.RemoteProtocolError):
+        # A probe accepted just before SIGTERM may be reset while idle sockets
+        # close. Retry until a new connection is actually refused.
+        return False
 
 
 def accounting(database, estimated):

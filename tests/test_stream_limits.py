@@ -384,7 +384,7 @@ async def test_lifespan_drains_tasks_spawned_after_first_snapshot(monkeypatch):
     from gateway import main
     fake_db = SimpleNamespace(dispose=AsyncMock())
     monkeypatch.setattr(db, 'engine', fake_db)
-    monkeypatch.setattr(main, 'get_settings', lambda: SimpleNamespace(provider_timeout_seconds=120))
+    monkeypatch.setattr(main, 'get_settings', lambda: SimpleNamespace(provider_timeout_seconds=120, azure_workload_identity_enabled=False))
     instance = FastAPI()
     context = main.lifespan(instance)
     await context.__aenter__()

@@ -135,6 +135,12 @@ async def test_inspection_wrong_primary_is_readonly(client, monkeypatch):
                       "database_fingerprint": fingerprint(old),
                       "configured_fingerprint": fingerprint(target), "primary_matches": False}
     assert await snapshot() == before
+    from gateway.check import inspect_installation
+    preflight = await inspect_installation()
+    assert preflight["ok"] is False
+    assert preflight["checks"]["schema"] is True
+    assert preflight["checks"]["provider_credentials"] is False
+    assert preflight["reason"] == "Installation encryption key does not match database"
     configure(monkeypatch, old, [])
     assert (await inspect_encryption())["primary_matches"] is True
     assert await snapshot() == before

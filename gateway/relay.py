@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import hmac
 import ipaddress
+import logging
 import math
 import os
 import time
@@ -18,6 +19,75 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+
+
+log = logging.getLogger("gateway.relay")
+
+
+class ResponseCloser:
+    """One retained close operation, even if callers repeatedly disconnect."""
+    def __init__(self, response, tasks):
+        self.response, self.tasks, self.task = response, tasks, None
+        self.stream = response.stream
+        # HTTPX also closes on natural iterator exhaustion. Route that close
+        # through the same retained task before it can be interrupted.
+        response.stream = RetainedCloseStream(self.stream, self)
+
+    async def __call__(self):
+        if self.task is None:
+            self.response.is_closed = True
+            async def close():
+                try:
+                    await asyncio.wait_for(self.stream.aclose(), timeout=5)
+                except Exception:
+                    log.warning("Central response cleanup failed")
+            self.task = asyncio.create_task(close())
+            self.tasks.add(self.task)
+            self.task.add_done_callback(self.tasks.discard)
+        # Do not delay an already-cancelled response on subsequent finally
+        # calls. Lifespan retains and drains the independent cleanup task.
+        if asyncio.current_task().cancelling():
+            return
+        await asyncio.shield(self.task)
+
+
+class RetainedCloseStream(httpx.AsyncByteStream):
+    def __init__(self, stream, close):
+        self.stream, self.close = stream, close
+
+    async def __aiter__(self):
+        async for chunk in self.stream:
+            yield chunk
+
+    async def aclose(self):
+        await self.close()
+
+
+class RelayStreamingResponse(StreamingResponse):
+    def __init__(self, *args, on_close, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.on_close = on_close
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self.on_close()
+
+
+class RelayRequestDrainMiddleware:
+    def __init__(self, app, active):
+        self.app, self.active = app, active
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http':
+            return await self.app(scope, receive, send)
+        task = asyncio.current_task()
+        self.active.add(task)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self.active.discard(task)
 
 
 def _loopback(host: str) -> bool:
@@ -155,19 +225,29 @@ def create_relay_app(settings: RelaySettings | None = None, client: httpx.AsyncC
         trust_env=False,
     )
     broker = TokenBroker(settings, client)
+    cleanup_tasks = set()
+    active_requests = set()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:
             yield
         finally:
+            # Uvicorn may begin lifespan immediately after cancelling requests;
+            # wait for their finally blocks to register retained cleanup first.
+            while active_requests:
+                await asyncio.gather(*tuple(active_requests), return_exceptions=True)
+            while cleanup_tasks:
+                await asyncio.gather(*tuple(cleanup_tasks), return_exceptions=True)
             if broker._journal is not None:
                 broker._journal.close()
             if owned:
                 await client.aclose()
 
     app = FastAPI(title="Local LLM Relay", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app.add_middleware(RelayRequestDrainMiddleware, active=active_requests)
     app.state.broker = broker
+    app.state.cleanup_tasks = cleanup_tasks
 
     @app.get("/health/live")
     async def live():
@@ -190,6 +270,7 @@ def create_relay_app(settings: RelaySettings | None = None, client: httpx.AsyncC
             raise HTTPException(415, "Expected application/json")
         token = await broker.token()
         upstream: httpx.Response | None = None
+        close = None
         try:
             for attempt in range(2):
                 outbound = client.build_request(
@@ -199,39 +280,44 @@ def create_relay_app(settings: RelaySettings | None = None, client: httpx.AsyncC
                     content=bytes(body),
                 )
                 upstream = await client.send(outbound, stream=True, follow_redirects=False)
+                close = ResponseCloser(upstream, cleanup_tasks)
                 # Only retry a rejected authentication response before returning any bytes.
                 if upstream.status_code == 401 and attempt == 0:
-                    await upstream.aclose()
+                    await close()
                     token = await broker.token(rejected_token=token)
                     continue
                 break
+            assert upstream is not None
+            if upstream.status_code == 401:
+                await close()
+                raise HTTPException(503, "Central gateway rejected relay credentials")
+            if 300 <= upstream.status_code < 400:
+                await close()
+                raise HTTPException(502, "Central gateway redirect rejected")
+
+            async def response_body():
+                try:
+                    async for chunk in upstream.aiter_bytes():
+                        yield chunk
+                finally:
+                    await close()
+
+            # Never leak cookies, credentials, hop-by-hop or provider-specific auth headers.
+            headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+            content_type = upstream.headers.get("content-type", "application/json")
+            headers["Content-Type"] = content_type
+            for name in ("x-request-id", "retry-after"):
+                if name in upstream.headers:
+                    headers[name] = upstream.headers[name]
+            return RelayStreamingResponse(response_body(), status_code=upstream.status_code, headers=headers, on_close=close)
         except httpx.HTTPError:
-            if upstream is not None:
-                await upstream.aclose()
+            if close is not None:
+                await close()
             return JSONResponse({"detail": "Central gateway unavailable"}, status_code=502)
-        assert upstream is not None
-        if upstream.status_code == 401:
-            await upstream.aclose()
-            raise HTTPException(503, "Central gateway rejected relay credentials")
-        if 300 <= upstream.status_code < 400:
-            await upstream.aclose()
-            raise HTTPException(502, "Central gateway redirect rejected")
-
-        async def response_body():
-            try:
-                async for chunk in upstream.aiter_bytes():
-                    yield chunk
-            finally:
-                await upstream.aclose()
-
-        # Never leak cookies, credentials, hop-by-hop or provider-specific auth headers.
-        headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
-        content_type = upstream.headers.get("content-type", "application/json")
-        headers["Content-Type"] = content_type
-        for name in ("x-request-id", "retry-after"):
-            if name in upstream.headers:
-                headers[name] = upstream.headers[name]
-        return StreamingResponse(response_body(), status_code=upstream.status_code, headers=headers)
+        except BaseException:
+            if close is not None:
+                await close()
+            raise
 
     app.add_api_route("/v1/chat/completions", forward, methods=["POST"])
     app.add_api_route("/v1/responses", forward, methods=["POST"])

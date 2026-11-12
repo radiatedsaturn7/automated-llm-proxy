@@ -1,6 +1,6 @@
 # Maintenance-window master-key rotation
 
-This release supports an explicit, transactional rotation of **database encryption**
+Brrrtgate supports an explicit, transactional rotation of **database encryption**
 keys. It does not rotate `GATEWAY_SIGNING_KEY`, promise zero downtime, or fence old
 binaries/direct SQL writers. Use a maintenance window and remove those writers first.
 

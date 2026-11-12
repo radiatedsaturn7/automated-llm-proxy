@@ -1,4 +1,4 @@
-# Thunderbolt observability
+# Brrrtgate observability
 
 HTTP correlation and monitoring use metadata only. They are not prompt logging or distributed tracing.
 

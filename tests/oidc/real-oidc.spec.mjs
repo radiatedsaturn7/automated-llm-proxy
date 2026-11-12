@@ -28,6 +28,6 @@ test('real Keycloak PKCE login, groups, CSRF, local and signed back-channel logo
 });
 test('real Keycloak authenticated user without authorized group is denied',async({page})=>{
   await login(page,'outsider-fixture');await expect(page).toHaveURL(/gateway\.test\/auth\/oidc\/callback/);
-  await expect(page.locator('body')).toContainText('No unambiguous authorized SSO group');
+  await expect(page.locator('body')).toContainText('No unambiguous authorized SSO policy');
   expect((await (await page.request.get('/auth/session')).json()).authenticated).toBe(false);
 });

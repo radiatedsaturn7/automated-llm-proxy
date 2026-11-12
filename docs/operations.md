@@ -142,3 +142,35 @@ cryptographic erasure, a backup restoration exercise or production recovery SLA.
 Follow [encryption-key operations](encryption-key-operations.md) for draining,
 version compatibility, backup/key escrow and operator prerequisites. The report's
 original HA accounting totals precede the two additional rotation-probe requests.
+
+
+## Request upload deadline
+
+All HTTP requests must finish delivering their body within
+`REQUEST_BODY_TIMEOUT_SECONDS` (default **30 seconds**, supported range 0.1–120).
+This is an absolute receive deadline starting when the ASGI request enters the
+body middleware, not a per-chunk idle timer. A slow trickle does not extend it.
+Exceeding it returns HTTP 408 without dispatching authentication, database
+writes or a provider request. `MAX_REQUEST_BYTES` separately bounds the complete
+body (default 1 MiB); oversize chunks return 413 before being copied into the
+application's body buffer. A disconnected client is not dispatched. HTTP/1.x rejections explicitly close
+the connection rather than leaving an unfinished upload on keepalive; HTTP/2
+responses do not emit a connection-specific header.
+
+The deadline ends once the full body has been received; it does not shorten
+inference/streaming timeouts or charge/retry a rejected request. Cancellation
+from the server still propagates. Configure this non-secret value through your
+deployment environment or Helm `extraEnv`, for example:
+
+```yaml
+extraEnv:
+  - name: REQUEST_BODY_TIMEOUT_SECONDS
+    value: "15"
+```
+
+Enforce matching header/body deadlines, maximum connections, request size and
+per-client limits at the ingress/load balancer. The app cannot bound time spent
+receiving headers before ASGI dispatch, memory buffered by the ASGI server, or
+aggregate connections. This is not standalone denial-of-service protection.
+Clients receiving a 408 should establish a fresh connection; do not automatically
+replay ambiguous provider requests based on unrelated provider timeouts.

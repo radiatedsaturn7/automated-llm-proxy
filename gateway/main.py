@@ -47,19 +47,43 @@ class BodyLimitMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        limit = get_settings().max_request_bytes
-        # Read a bounded body before dispatch, so chunked uploads cannot bypass Content-Length.
+        cfg = get_settings()
+        limit = cfg.max_request_bytes
+        # Bound bytes AND total receive time before dispatch/authentication. An
+        # idle timeout alone permits an uploader to keep a request alive forever.
         body = bytearray()
-        more = True
-        while more:
-            message = await receive()
-            if message["type"] == "http.disconnect":
-                return
-            body.extend(message.get("body", b""))
-            if len(body) > limit:
-                response = JSONResponse({"detail": "Request body too large"}, status_code=413)
-                return await response(scope, receive, send)
-            more = message.get("more_body", False)
+        response = None
+        deadline = asyncio.get_running_loop().time() + cfg.request_body_timeout_seconds
+        try:
+            async with asyncio.timeout_at(deadline):
+                more = True
+                while more:
+                    # Also bound receive implementations that return immediately
+                    # without yielding (e.g. a prebuffered stream of tiny chunks).
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise TimeoutError
+                    message = await receive()
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise TimeoutError
+                    if message["type"] == "http.disconnect":
+                        return
+                    chunk = message.get("body", b"")
+                    if len(chunk) > limit - len(body):
+                        response = JSONResponse({"detail": "Request body too large"}, status_code=413)
+                        break
+                    body.extend(chunk)
+                    more = message.get("more_body", False)
+        except TimeoutError:
+            response = JSONResponse({"detail": "Request body receive deadline exceeded"}, status_code=408)
+        if response is not None:
+            # Uvicorn can cancel its keepalive timer when more bytes arrive on an
+            # unfinished request after the response. Close HTTP/1.x explicitly;
+            # connection-specific headers are forbidden in HTTP/2.
+            if scope.get("http_version", "1.1") in {"1.0", "1.1"}:
+                response.headers["Connection"] = "close"
+            # Do not apply the receive deadline to sending the rejection, or to
+            # application/provider work after a complete body has arrived.
+            return await response(scope, receive, send)
         consumed = False
 
         async def replay():

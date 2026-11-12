@@ -53,6 +53,10 @@ def test_rfc6238_vectors(stamp, expected):
 
 
 async def test_enrollment_one_use_grant_and_replay(client, admin_headers, monkeypatch):
+    # A replay must use the same TOTP counter even if slow password hashing or
+    # CI scheduling would otherwise cross the real clock's 30-second boundary.
+    frozen = db.now()
+    monkeypatch.setattr(db, "now", lambda: frozen)
     uid, grant, data = await begin(client, admin_headers, monkeypatch)
     repeated = await client.post(
         "/auth/local/mfa/enroll/start",

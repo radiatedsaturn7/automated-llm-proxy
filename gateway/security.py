@@ -87,7 +87,7 @@ async def identify(request: Request, allow_session=False):
             raise HTTPException(401, "Credential team no longer matches user")
         if team_id:
             team = await session.get(db.Team, team_id)
-            if team is None or not team.enabled:
+            if team is None or not team.enabled or team.deleted_at is not None:
                 raise HTTPException(403, "Team disabled")
         return Identity(user, key, browser_session, generation)
 

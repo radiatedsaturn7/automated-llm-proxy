@@ -31,6 +31,9 @@ class PolicyLock(Base):
 
 class Team(Base):
     __tablename__ = "teams"
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    deleted_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     scim_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     name: Mapped[str] = mapped_column(String(120), unique=True)
@@ -64,7 +67,7 @@ async def active_membership(session, user, team_id):
     if team_id is None:
         return user.team_id is None
     team = await session.get(Team, team_id)
-    if not team or not team.enabled:
+    if not team or not team.enabled or team.deleted_at is not None:
         return False
     return user.team_id == team_id or await session.get(TeamMembership, (user.id, team_id)) is not None
 

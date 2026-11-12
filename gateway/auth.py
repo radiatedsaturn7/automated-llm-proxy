@@ -40,7 +40,7 @@ async def exchange(request: Request):
             raise HTTPException(401, "User disabled or team changed")
         if key.team_id:
             team = await s.get(db.Team, key.team_id)
-            if not team or not team.enabled:
+            if not team or not team.enabled or team.deleted_at is not None:
                 raise HTTPException(403, "Team disabled")
         lifetime = min(300, int((aware(key.expires_at) - db.now()).total_seconds()))
         if lifetime < 1:
@@ -294,7 +294,7 @@ async def oidc_callback(request: Request, state: str = "", code: str = ""):
         user = await s.scalar(select(db.User).where(db.User.oidc_subject == subject))
         if mapping and mapping.get("team_id"):
             team = await s.get(db.Team, mapping["team_id"])
-            denied = not team or not team.enabled
+            denied = not team or not team.enabled or team.deleted_at is not None
         if denied:
             # Fence even a first-ever subject: a queued older allowed callback
             # must not create an administrator after a newer verified denial.

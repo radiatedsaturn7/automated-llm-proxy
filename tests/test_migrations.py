@@ -260,3 +260,24 @@ async def test_v9_identity_upgrade_fails_closed(migration_engine):
         assert (await conn.execute(text("SELECT scim_managed FROM users WHERE id='legacy-user'"))).scalar()
         assert (await conn.execute(text('SELECT COUNT(*) FROM browser_sessions'))).scalar() == 0
         assert (await conn.execute(text('SELECT COUNT(*) FROM local_passwords'))).scalar() == 0
+
+
+async def test_v14_preserves_team_identity_and_history(migration_engine):
+    from datetime import datetime, timezone
+    from gateway.migrations import REVISIONS, v0013
+    async with migration_engine.begin() as connection:
+        await connection.run_sync(version_metadata.create_all)
+        for number, revision in REVISIONS:
+            if number > 13:
+                break
+            await connection.run_sync(revision.upgrade)
+            await connection.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
+        await connection.execute(v0013.metadata.tables['teams'].insert().values(
+            id='historical-team', name='Original', scim_external_id='idp-original', enabled=False, budget_micros=900))
+    await migrate()
+    async with migration_engine.connect() as connection:
+        row = (await connection.execute(select(db.Team.__table__).where(db.Team.id=='historical-team'))).mappings().one()
+        assert row['name']=='Original' and row['scim_external_id']=='idp-original'
+        assert row['budget_micros']==900 and row['enabled'] is False
+        assert row['deleted_at'] is None and row['deleted_name'] is None and row['deleted_external_id'] is None
+    await migrate()

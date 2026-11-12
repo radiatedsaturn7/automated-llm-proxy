@@ -171,7 +171,9 @@ universal security guarantees or successful acceptance in an operator's environm
   SCIM certification, real-vendor enrollment certification or continuous IdP group
   refresh. Session expiry/cache TTL and revocation windows must fit the threat model.
 - No WORM or cryptographically tamper-evident audit store. Collector checkpoints
-  are not proof of immutable delivery. Define retention, erasure and durable export
+  are not proof of immutable delivery. Optional offline HMAC seals authenticate
+  completed export snapshots against an externally held key/anchor; they do not
+  prove source completeness or prevent rollback of the trusted anchor. Define retention, erasure and durable export
   destination controls. Reverse proxies/APM/providers can independently log content.
 - No contractual data-residency guarantees, regional policy enforcement, compliance
   attestation, database failover orchestration or multi-region consistency guarantee.

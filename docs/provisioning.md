@@ -14,7 +14,7 @@ User PUT requires the supported core User schema and an email `userName`. Omitte
 
 Group PATCH accepts case-insensitive operation verbs and case-sensitive supported attribute paths. `add members` takes an array of member objects; `replace members` replaces the entire membership; `remove members` without a value clears membership. To remove one member, use `{"op":"remove","path":"members[value eq \"USER_UUID\"]"}`. Removing a missing member is idempotent. Complex/arbitrary filters, nested groups and multiple-team membership management through SCIM remain unsupported. Explicit secondary memberships use the separate team API and must be reconciled separately; see team-delegation.md. Attribute-less add/replace objects can contain `displayName`, `externalId` and `members`. Unsupported operations or a later failure roll back all preceding changes, including credential revocations.
 
-Discovery describes only the implemented core subset and is bounded to User and Group resources. Common SCIM fields/extensions such as `name`, `emails`, enterprise department attributes and password are not accepted; configure your IdP mappings accordingly rather than assuming full standards or vendor certification. Group PUT replacement is supported as described below; Group DELETE remains unsupported. The API deliberately protects all administrator accounts and groups containing them from SCIM modification.
+Discovery describes only the implemented core subset and is bounded to User and Group resources. Common SCIM fields/extensions such as `name`, `emails`, enterprise department attributes and password are not accepted; configure your IdP mappings accordingly rather than assuming full standards or vendor certification. Group PUT replacement and Group DELETE tombstones are supported as described below. The API deliberately protects all administrator accounts and groups containing them from SCIM modification.
 
 
 ## Group replacement
@@ -36,7 +36,43 @@ member, or any explicit team-administrator membership. SCIM cannot dismantle tho
 administration grants or escalate roles. Mutations revalidate the caller's live provisioning
 permission inside the policy transaction, serializing with revocation.
 
-Group DELETE is intentionally **unsupported**. A disabled gateway team is not a deleted
-SCIM resource. Physical deletion would damage historical references, and soft-deactivation
-without proper tombstone/recreation semantics would mislead IdP reconciliation. Manage
-team deactivation through administrator APIs until explicit SCIM deletion semantics exist.
+## Group deletion, recreation and historical records
+
+DELETE `/scim/v2/Groups/{id}` atomically retires the group and returns 204. Subsequent
+SCIM GET/PUT/PATCH for that identifier return 404, and SCIM lists and filters exclude it.
+Repeated DELETE for a retained tombstone returns 204 without a second deletion audit;
+an unknown identifier returns 404. A disabled but not deleted team is still cleaned up.
+
+Use a maintenance upgrade: drain traffic and in-flight work, stop all older replicas
+and background writers, then run the explicit v14 migration and start the tombstone-aware
+release everywhere. Do not use Group DELETE until all writers run the new revision.
+Old v13 binaries do not check the deletion marker and could re-enable tombstones; exact-head
+readiness helps routing but does not fence direct old-binary writes. This is not a
+zero-downtime mixed-version rollout guarantee.
+
+The database retains the original team ID, budget, billing and audit history. Migration
+v14 adds an explicit deletion timestamp and archived display name/external ID. Deletion
+releases the live unique name/external ID while retaining their historical values, so an
+IdP can recreate both values with a **new** team ID. Old credentials never regain access
+to that new resource. Internal tombstone names are not public display names.
+
+Deletion removes all explicit memberships in that team and detaches primary members.
+It revokes every key bound to the deleted team and, conservatively, all keys belonging
+to users whose primary team changed. It invalidates the browser sessions of primary and
+explicit members. Unrelated secondary-team memberships and secondary members' unrelated
+keys remain intact. Pending usage reservations and recorded usage retain their team IDs
+for finalization/accounting. In-flight requests admitted before deletion may finish.
+
+Groups containing a global administrator (primary or explicit member), or an explicit
+team administrator, cannot be deleted through SCIM. An operator must reconcile those
+privileged memberships explicitly first. Caller authorization is rechecked inside the
+same transaction as membership removal, revocation and tombstoning.
+
+Normal administrator team lists also exclude tombstones. Global administrators can use
+`GET /admin/api/teams?include_deleted=true` for read-only historical visibility. Those
+records expose their archived name/external ID and `deleted_at`, and report `enabled:false`.
+They cannot be edited, re-enabled, assigned users or issued new team-bound credentials.
+An old OIDC group mapping to a deleted team remains denied; update the mapping deliberately
+to a newly created team rather than assuming matching display names rebind access.
+
+This implements the documented subset, not a vendor interoperability certification.

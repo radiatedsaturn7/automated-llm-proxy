@@ -63,7 +63,7 @@ async def reserve(identity, amount, tokens, model, *, selected_provider=None):
             raise HTTPException(403, "Credential team changed")
         if key.allowed_models and model not in key.allowed_models:
             raise HTTPException(403, "Model not allowed by key")
-        if key.team_id and (not team or not team.enabled):
+        if key.team_id and (not team or not team.enabled or team.deleted_at is not None):
             raise HTTPException(403, "Team disabled")
         period = db.now().strftime("%Y-%m")
         for entity, field in [(user, "user_id"), (team, "team_id")]:

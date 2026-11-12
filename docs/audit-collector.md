@@ -77,3 +77,7 @@ Omit --output-dir to emit JSONL on stdout. This mode has **no checkpoint**:
 flushing a pipe does not prove the downstream sink persisted anything. Bounded
 incomplete stdout runs must be replayed from the window start; deduplicate by id.
 Use durable directory mode for resumable collection.
+
+## Optional offline authentication
+
+After collection completes, use the [audit sealing tool](audit-sealing.md) to create an authenticated snapshot with a dedicated external key and anchor. It leaves collection and resume behavior unchanged and makes no network calls. Verification is read-only; failed verification must not be treated as permission to overwrite the anchor.

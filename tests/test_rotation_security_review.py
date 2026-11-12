@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from gateway import db
 from gateway.config import get_settings
 from gateway.migrate import migrate, versions, version_metadata
-from gateway.migrations import v0012
+from gateway.migrations import HEAD, v0012
 from tests.test_migrations import migration_engine as migration_engine
 
 
@@ -45,7 +45,7 @@ async def test_primary_only_initialization_rejects_fallback_encrypted_last_row(m
     monkeypatch.setenv("GATEWAY_MASTER_KEY", old_key)
     monkeypatch.setenv("GATEWAY_MASTER_DECRYPT_KEYS", "[]")
     get_settings.cache_clear()
-    assert await migrate() == 13
+    assert await migrate() == HEAD
 
 
 @pytest.mark.parametrize("inference", [False, True])

@@ -131,3 +131,15 @@ Anonymous initiation is atomically capacity-bounded in the shared database, and
 random polling proofs are rejected before acquiring the exclusive policy gate.
 Put per-source rate limiting on enrollment endpoints at the ingress: bounded
 storage alone cannot prevent attackers exhausting anonymous pending slots.
+
+### Disconnect cleanup
+
+The relay retains a single close operation for each central response, including
+when the local caller disconnects before streaming starts or during HTTPX's
+end-of-stream cleanup. Repeated cancellation does not cancel that retained close.
+Shutdown waits for HTTP request cleanup to register, then drains outstanding
+closes before disposing the owned central client. Each close uses a five-second
+cooperative timeout (not a hard deadline for cancellation-resistant transports)
+and logs only a generic warning on failure;
+forced process termination can still interrupt cleanup. This resource cleanup
+does not add inference retries or change central accounting semantics.

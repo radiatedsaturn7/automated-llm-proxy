@@ -86,5 +86,5 @@ async def close_credential(app):
         try:
             async with asyncio.timeout(5):
                 await credential.close()
-        except Exception:
+        except Exception:  # nosec B110 # Credential teardown must not prevent HTTP/DB shutdown; never log SDK secrets.
             pass  # A credential cleanup failure must not skip HTTP/DB shutdown.

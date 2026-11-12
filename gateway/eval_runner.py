@@ -131,7 +131,7 @@ async def run(settings, cases, *, execute=False, api_key=None, client=None):
                 if response is not None:
                     try:
                         await asyncio.wait_for(response.aclose(), min(settings.timeout, 2))
-                    except Exception:
+                    except Exception:  # nosec B110 # Best-effort teardown must preserve dispatch accounting; never log transport secrets.
                         pass  # Cleanup cannot override a scored or unknown dispatch outcome.
 
     try:
@@ -142,7 +142,7 @@ async def run(settings, cases, *, execute=False, api_key=None, client=None):
         if owned:
             try:
                 await asyncio.wait_for(client.aclose(), min(settings.timeout, 2))
-            except Exception:
+            except Exception:  # nosec B110 # Best-effort teardown only; no retry of potentially billed inference.
                 pass  # Never emit transport teardown diagnostics or retry inference.
     baseline, candidate = results[:len(cases)], results[len(cases):]
     regressions = []

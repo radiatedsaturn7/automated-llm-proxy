@@ -77,5 +77,5 @@ def evaluate(cases: Sequence[Mapping], rules: Sequence[str] = ("exact_match",)) 
         "pass_rate": sum(row["passed"] for row in results) / len(results),
         "rules": {rule: {"passed": count, "pass_rate": count / len(results)} for rule, count in counts.items()},
         "results": results,
-        "token_estimate_method": "ceil(unicode_characters / 4); not a tokenizer or billing estimate",
+        "token_estimate_method": "ceil(unicode_characters / 4); not a tokenizer or billing estimate",  # nosec B105 # Public estimate-method label, not a secret.
     }

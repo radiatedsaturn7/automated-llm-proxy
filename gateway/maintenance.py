@@ -14,14 +14,18 @@ async def cleanup(*, apply=False, batch_size=1000):
     cutoff = db.now()
     targets = [
         (db.OIDCState, db.OIDCState.digest, db.OIDCState.expires_at < cutoff),
-        (db.OIDCLogoutReplay, db.OIDCLogoutReplay.digest, db.OIDCLogoutReplay.expires_at < cutoff),
         (db.BrowserSession, db.BrowserSession.digest, db.BrowserSession.expires_at < cutoff),
     ]
     counts = {}
     async with db.transaction() as session:
         # Admission buckets use the shared clock. A fast maintenance replica
         # must not delete a live bucket and reopen its rate allowance.
-        bucket_cutoff = ((await db.database_now(session)) - timedelta(days=1)).strftime("%Y%m%d%H%M")
+        shared_now = await db.database_now(session)
+        # Replay fences remain security-relevant to authenticating replicas. A
+        # fast cleanup host must not erase them while logout tokens remain valid.
+        targets.append((db.OIDCLogoutReplay, db.OIDCLogoutReplay.digest,
+                        db.OIDCLogoutReplay.expires_at < shared_now))
+        bucket_cutoff = (shared_now - timedelta(days=1)).strftime("%Y%m%d%H%M")
         targets.append((db.RateBucket, db.RateBucket.id,
                         func.substr(db.RateBucket.id, func.length(db.RateBucket.id) - 11) < bucket_cutoff))
         for model, key, predicate in targets:

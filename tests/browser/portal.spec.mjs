@@ -149,3 +149,77 @@ test('successful password change clears portal despite concurrent key refresh', 
   await expect(page.locator('#secret')).toHaveValue('');
   await expect(page.locator('#secret-dialog')).toBeHidden();
 });
+
+const emptyAllowance = {enabled:true,day:'2026-11-12',month:'2026-11',daily_request_limit:10,requests_used:10,requests_remaining:0,monthly_reset_limit:4,resets_used:0,resets_remaining:4,allowance_renews_at:'2026-11-13T00:00:00Z',resets_renew_at:'2026-12-01T00:00:00Z'};
+async function allowancePage(page, value=emptyAllowance) {
+  await page.route('**/account/api/usage-allowance', route=>route.fulfill({json:value}));
+  await securityPage(page);
+  await expect(page.locator('#allowance-panel')).toBeVisible();
+}
+
+test('usage reset confirms costs, suppresses duplicate clicks and updates remaining credits', async ({page}) => {
+  let finish; const requests=[];
+  await page.route('**/account/api/reset-usage', async route=>{
+    requests.push(route.request()); await new Promise(resolve=>finish=resolve);
+    await route.fulfill({json:{...emptyAllowance,requests_used:0,requests_remaining:10,resets_used:1,resets_remaining:3,reset_applied:true,replayed:false}});
+  });
+  await allowancePage(page);
+  page.once('dialog', dialog=>dialog.dismiss()); await page.locator('#reset-usage').click();
+  expect(requests).toHaveLength(0);
+  page.once('dialog', dialog=>{expect(dialog.message()).toContain('cost money'); return dialog.accept();});
+  await page.locator('#reset-usage').click();
+  await expect.poll(()=>requests.length).toBe(1);
+  await expect(page.locator('#reset-usage')).toBeDisabled();
+  await expect(page.locator('#refresh-allowance')).toBeDisabled();
+  expect(requests[0].headers()['x-csrf-token']).toBe('test-csrf');
+  expect(requests[0].postDataJSON().expected_day).toBe('2026-11-12');
+  expect(requests[0].postDataJSON().operation_id).toMatch(/^[0-9a-f-]{36}$/);
+  finish();
+  await expect(page.locator('#allowance-summary')).toContainText('3 of 4 reset credits');
+  await expect(page.locator('#allowance-message')).toContainText('replenished');
+  await expect(page.locator('#reset-usage')).toBeDisabled();
+});
+
+test('uncertain usage reset retries exact operation even after status refresh', async ({page}) => {
+  const requests=[];
+  await page.route('**/account/api/reset-usage', route=>{
+    requests.push(route.request().postDataJSON());
+    if (requests.length===1) return route.abort('failed');
+    if (requests.length===2) return route.fulfill({status:429,json:{detail:'Overloaded'}});
+    return route.fulfill({json:{...emptyAllowance,resets_used:1,resets_remaining:3,replayed:true}});
+  });
+  await allowancePage(page);
+  page.once('dialog', dialog=>dialog.accept()); await page.locator('#reset-usage').click();
+  await expect(page.locator('#allowance-message')).toContainText('uncertain');
+  await page.locator('#refresh-allowance').click();
+  await page.getByRole('button',{name:'Retry pending reset'}).click();
+  await expect.poll(()=>requests.length).toBe(2);
+  await expect(page.getByRole('button',{name:'Retry pending reset'})).toBeEnabled();
+  await page.getByRole('button',{name:'Retry pending reset'}).click();
+  await expect(page.locator('#allowance-message')).toContainText('Earlier reset confirmed');
+  expect(requests).toHaveLength(3); expect(requests[1]).toEqual(requests[0]); expect(requests[2]).toEqual(requests[0]);
+});
+
+test('usage reset cannot render a late response after logout', async ({page}) => {
+  let finish;
+  await page.route('**/account/api/reset-usage', async route=>{
+    await new Promise(resolve=>finish=resolve); await route.fulfill({json:{...emptyAllowance,requests_remaining:10}});
+  });
+  await page.route('**/auth/logout', route=>route.fulfill({status:204}));
+  await allowancePage(page);
+  page.once('dialog', dialog=>dialog.accept()); await page.locator('#reset-usage').click();
+  await expect.poll(()=>Boolean(finish)).toBe(true);
+  await page.getByRole('button',{name:'Sign out',exact:true}).click(); finish();
+  await expect(page.locator('#allowance-panel')).toBeHidden();
+  await expect(page.locator('#allowance-summary')).toBeEmpty();
+  await expect(page.locator('#allowance-message')).toBeEmpty();
+});
+
+test('unexhausted allowance and spent reset credits cannot be reset', async ({page}) => {
+  await allowancePage(page, {...emptyAllowance,requests_used:2,requests_remaining:8});
+  await expect(page.locator('#reset-usage')).toBeDisabled();
+  await page.route('**/account/api/usage-allowance', route=>route.fulfill({json:{...emptyAllowance,resets_used:4,resets_remaining:0}}));
+  await page.locator('#refresh-allowance').click();
+  await expect(page.locator('#allowance-summary')).toContainText('0 of 4 reset credits');
+  await expect(page.locator('#reset-usage')).toBeDisabled();
+});

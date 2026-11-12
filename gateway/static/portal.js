@@ -3,12 +3,17 @@ let csrf = '';
 let generation = 0;
 let signedOut = false;
 let secretTimer;
+let allowance = null;
+let resetOperation = null;
+let resetInFlight = false;
+let allowanceGeneration = 0;
 const message = document.getElementById('message');
 const el = id => document.getElementById(id);
 function clearSecret() { clearTimeout(secretTimer); el('secret').value = ''; }
 function clearPasswords() { el('password-form').reset(); }
 function clearLocal() {
   signedOut = true; ++generation; csrf = '';
+  ++allowanceGeneration; allowance = null; resetOperation = null; el('allowance-panel').hidden = true; el('allowance-summary').textContent = ''; el('allowance-message').textContent = '';
   clearPasswords(); el('security').hidden = true;
   clearSecret(); el('secret-dialog').close(); el('profile').textContent = ''; el('keys').replaceChildren();
 }
@@ -29,6 +34,7 @@ async function load() {
     el('password-form').hidden = !profile.can_change_password;
     el('password-mfa').hidden = !profile.local_mfa_enrolled;
     el('password-code').required = Boolean(profile.local_mfa_enrolled);
+    if (csrf) loadAllowance();
     const visible = {...profile}; delete visible.csrf_token;
     el('profile').textContent = JSON.stringify(visible, null, 2);
     const keys = await api('/account/api/keys');
@@ -61,6 +67,7 @@ async function load() {
     message.textContent = '';
   } catch (error) {
     if (!signedOut && version === generation) {
+      ++allowanceGeneration; allowance = null; el('allowance-panel').hidden = true;
       clearPasswords(); el('security').hidden = true;
       csrf = ''; el('profile').textContent = ''; el('keys').replaceChildren(); clearSecret(); el('secret-dialog').close();
       message.textContent = error.message;
@@ -110,5 +117,60 @@ el('password-form').addEventListener('submit', async event => {
   } finally { el('change-password').disabled = false; }
 });
 api('/auth/local/options').then(options => { el('local-login').hidden = !options.enabled; }).catch(() => {});
+function renderAllowance() {
+  el('refresh-allowance').disabled = resetInFlight;
+  el('allowance-panel').hidden = !allowance?.enabled;
+  if (!allowance?.enabled) return;
+  el('allowance-summary').textContent = `${allowance.requests_remaining} of ${allowance.daily_request_limit} requests remaining today (UTC). ${allowance.resets_remaining} of ${allowance.monthly_reset_limit} reset credits remaining this month. Daily renewal: ${allowance.allowance_renews_at}. Credits renew: ${allowance.resets_renew_at}.`;
+  el('reset-usage').textContent = resetOperation ? 'Retry pending reset' : 'Use one reset credit';
+  el('reset-usage').disabled = resetInFlight || (!resetOperation && (allowance.requests_remaining !== 0 || allowance.resets_remaining < 1));
+}
+async function loadAllowance() {
+  if (resetInFlight || signedOut) return;
+  const version = ++allowanceGeneration;
+  try {
+    const result = await api('/account/api/usage-allowance');
+    if (signedOut || version !== allowanceGeneration) return;
+    allowance = result; renderAllowance();
+  } catch (_) {
+    if (!signedOut && version === allowanceGeneration) {
+      el('reset-usage').disabled = true;
+      el('allowance-message').textContent = 'Allowance unavailable. Refresh to try again.';
+    }
+  }
+}
+el('refresh-allowance').addEventListener('click', loadAllowance);
+el('reset-usage').addEventListener('click', async () => {
+  if (signedOut || resetInFlight || !allowance?.enabled) return;
+  if (!resetOperation) {
+    if (allowance.requests_remaining !== 0 || allowance.resets_remaining < 1) return;
+    if (!confirm('Use one reset credit to replenish today’s request allowance? Provider calls still cost money, and hard spending/rate limits remain unchanged.')) return;
+    resetOperation = {operation_id:crypto.randomUUID(), expected_day:allowance.day};
+  }
+  resetInFlight = true; ++allowanceGeneration; renderAllowance();
+  try {
+    const response = await fetch('/account/api/reset-usage', {method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(resetOperation)});
+    if (signedOut) return;
+    if (!response.ok) {
+      // Only an endpoint-specific conflict resolves this pending operation.
+      // Overload/auth/proxy errors on a retry cannot tell us whether an earlier
+      // attempt committed, so retain its ID rather than spending another credit.
+      if (response.status === 409) {
+        const error = await response.json().catch(() => null);
+        if (['Reset operation was already used for another day', 'Allowance day changed; refresh before resetting', 'No usage reset available', 'Request allowance is not exhausted'].includes(error?.detail)) resetOperation = null;
+      }
+      throw new Error('Reset not confirmed');
+    }
+    const result = await response.json();
+    if (signedOut) return;
+    ++allowanceGeneration; allowance = result; resetOperation = null;
+    el('allowance-message').textContent = result.replayed ? 'Earlier reset confirmed. Current usage is shown.' : 'Request allowance replenished. Spending and rate limits are unchanged.';
+  } catch (_) {
+    if (!signedOut) el('allowance-message').textContent = resetOperation ? 'Reset outcome uncertain. Retry pending reset to confirm the same operation without spending another credit. Do not start a new reset in another tab.' : 'Reset unavailable or allowance changed. Refresh before trying again.';
+  } finally {
+    resetInFlight = false;
+    if (!signedOut) renderAllowance();
+  }
+});
 window.addEventListener('pagehide', clearLocal);
 load();

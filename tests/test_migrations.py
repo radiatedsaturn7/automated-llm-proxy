@@ -281,3 +281,23 @@ async def test_v14_preserves_team_identity_and_history(migration_engine):
         assert row['budget_micros']==900 and row['enabled'] is False
         assert row['deleted_at'] is None and row['deleted_name'] is None and row['deleted_external_id'] is None
     await migrate()
+
+
+async def test_v15_adds_disabled_allowances_without_altering_users(migration_engine):
+    from datetime import datetime, timezone
+    from gateway.migrations import REVISIONS, v0014
+    async with migration_engine.begin() as connection:
+        await connection.run_sync(version_metadata.create_all)
+        for number, revision in REVISIONS:
+            if number > 14:
+                break
+            await connection.run_sync(revision.upgrade)
+            await connection.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
+        await connection.execute(v0014.metadata.tables['users'].insert().values(
+            id='existing', email='existing@example.test', role='member', enabled=True,
+            scim_managed=False, budget_micros=1234))
+    await migrate()
+    async with migration_engine.connect() as connection:
+        assert (await connection.execute(select(db.User.__table__.c.budget_micros))).scalar() == 1234
+        assert not (await connection.execute(select(db.UserAllowance.__table__))).all()
+    await migrate()

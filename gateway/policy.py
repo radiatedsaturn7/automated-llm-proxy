@@ -85,6 +85,8 @@ async def reserve(identity, amount, tokens, model, *, selected_provider=None):
             s.add(bucket)
         if bucket.requests + 1 > key.rpm or bucket.tokens + tokens > key.tpm:
             raise HTTPException(429, "Rate limit exceeded", headers={"Retry-After": "60"})
+        from .allowances import consume
+        await consume(s, user.id, admitted_at)
         bucket.requests += 1
         bucket.tokens += tokens
         reservation = db.Reservation(user_id=user.id, team_id=key.team_id, key_id=key.id,

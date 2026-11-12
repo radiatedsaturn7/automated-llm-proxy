@@ -187,3 +187,8 @@ evidence link, result, residual risk and remediation/rollback. Keep credentials,
 raw user content and secret-bearing dumps out of that record. A deferred item
 must have an explicit risk owner; do not silently convert it into a passing check.
 Internal readiness decisions do not imply an external audit has occurred.
+
+For the current single-master-key limits and a cautious recovery/compromise
+checklist, see [encryption key operations](encryption-key-operations.md). Mounted
+secret delivery is not automatic key rotation; a future fenced re-encryption
+mechanism is a design proposal, not an available command.

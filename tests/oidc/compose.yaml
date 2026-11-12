@@ -11,6 +11,17 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+  secret-init:
+    image: python:3.12-slim
+    user: '0:0'
+    command: [python, /fixture/project_secrets.py]
+    network_mode: none
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./project_secrets.py:/fixture/project_secrets.py:ro
+      - ./generated/installation:/source:ro
+      - installation-secrets:/installation
   migrate:
     image: automated-llm-proxy:oidc-ci
     build:
@@ -18,22 +29,33 @@ services:
       dockerfile: tests/oidc/Dockerfile.gateway
     command: [python, -m, gateway.migrate]
     environment: &gateway-env
-      DATABASE_URL: ${DATABASE_URL:?}
-      GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?}
-      GATEWAY_SIGNING_KEY: ${GATEWAY_SIGNING_KEY:?}
-      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:?}
-      METRICS_TOKEN: ${METRICS_TOKEN:?}
+      DATABASE_URL_FILE: /run/secrets/thunderbolt/DATABASE_URL
+      GATEWAY_MASTER_KEY_FILE: /run/secrets/thunderbolt/GATEWAY_MASTER_KEY
+      GATEWAY_SIGNING_KEY_FILE: /run/secrets/thunderbolt/GATEWAY_SIGNING_KEY
+      BOOTSTRAP_TOKEN_FILE: /run/secrets/thunderbolt/BOOTSTRAP_TOKEN
+      METRICS_TOKEN_FILE: /run/secrets/thunderbolt/METRICS_TOKEN
+      GATEWAY_SECRETS_DIR: /run/secrets/thunderbolt
       ENVIRONMENT: production
       PUBLIC_URL: https://gateway.test
       OIDC_ISSUER: https://idp.test/realms/gateway-ci
       OIDC_CLIENT_ID: gateway
-      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?}
+      OIDC_CLIENT_SECRET_FILE: /run/secrets/thunderbolt/OIDC_CLIENT_SECRET
       OIDC_GROUP_MAPPING: '{"gateway-admins":{"role":"admin"}}'
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - installation-secrets:/run/secrets/thunderbolt:ro
     depends_on:
+      secret-init: {condition: service_completed_successfully}
       postgres: {condition: service_healthy}
   gateway:
     image: automated-llm-proxy:oidc-ci
     environment: *gateway-env
+    volumes:
+      - installation-secrets:/run/secrets/thunderbolt:ro
+      - ./check_mounted.py:/fixture/check_mounted.py:ro
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -62,3 +84,6 @@ services:
       default:
         aliases: [idp.test, gateway.test]
     depends_on: [gateway, keycloak]
+
+volumes:
+  installation-secrets:

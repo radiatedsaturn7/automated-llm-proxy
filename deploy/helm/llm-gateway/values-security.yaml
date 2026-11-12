@@ -1,0 +1,17 @@
+# Opt-in production security profile. REQUIRED operator inputs:
+# non-default --namespace, image.repository + verified image.digest,
+# mountedSecrets.existingSecret (precreated/versioned), and environment-specific
+# networkPolicy ingress/egress peers. This intentionally starts DENY ALL.
+securityProfile:
+  enabled: true
+existingSecret: ''
+image:
+  digest: ''
+  pullPolicy: Always
+mountedSecrets:
+  existingSecret: ''
+networkPolicy:
+  enabled: true
+  ingress: []
+  egress: []
+environment: production

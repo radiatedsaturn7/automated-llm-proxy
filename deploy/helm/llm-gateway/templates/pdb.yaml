@@ -2,6 +2,7 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
+  namespace: {{ .Release.Namespace | quote }}
   name: {{ include "gateway.fullname" . }}
   labels: {{- include "gateway.labels" . | nindent 4 }}
 spec:

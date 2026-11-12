@@ -147,3 +147,34 @@ env:
       {{- end }}
 {{- end -}}
 {{- end -}}
+
+{{- define "gateway.validateSecurityProfile" -}}
+{{- if .Values.securityProfile.enabled -}}
+{{- if or (eq .Release.Namespace "default") (eq .Release.Namespace "") -}}
+{{- fail "securityProfile requires an explicit non-default namespace" -}}
+{{- end -}}
+{{- if or .Values.existingSecret (not .Values.mountedSecrets.existingSecret) -}}
+{{- fail "securityProfile requires mountedSecrets.existingSecret and no existingSecret" -}}
+{{- end -}}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" .Values.image.digest) -}}
+{{- fail "securityProfile requires an immutable image.digest" -}}
+{{- end -}}
+{{- if ne .Values.image.pullPolicy "Always" -}}
+{{- fail "securityProfile requires image.pullPolicy=Always" -}}
+{{- end -}}
+{{- if not .Values.networkPolicy.enabled -}}
+{{- fail "securityProfile requires networkPolicy.enabled" -}}
+{{- end -}}
+{{- if ne .Values.environment "production" -}}
+{{- fail "securityProfile requires environment=production" -}}
+{{- end -}}
+{{- if and .Values.ingress.enabled (not .Values.ingress.tls) -}}
+{{- fail "securityProfile ingress requires TLS configuration" -}}
+{{- end -}}
+{{- range .Values.extraEnv -}}
+{{- if and .valueFrom .valueFrom.secretKeyRef -}}
+{{- fail "securityProfile rejects secretKeyRef environment variables; mount secrets instead" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

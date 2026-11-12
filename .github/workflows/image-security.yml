@@ -1,0 +1,121 @@
+name: Image security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      SYFT_VERSION: '1.57.1'
+      GRYPE_VERSION: '0.121.3'
+      SYFT_CHECK_FOR_APP_UPDATE: 'false'
+      GRYPE_CHECK_FOR_APP_UPDATE: 'false'
+      GRYPE_DB_VALIDATE_AGE: 'true'
+      GRYPE_DB_MAX_ALLOWED_BUILT_AGE: '120h'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install checksum-pinned official scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/scanners" evidence
+          cd "$RUNNER_TEMP/scanners"
+          curl --fail --location --silent --show-error --retry 3 --max-time 180 \
+            -o syft.tar.gz "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          echo 'bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c  syft.tar.gz' | sha256sum --check --strict
+          tar -xzf syft.tar.gz syft
+          curl --fail --location --silent --show-error --retry 3 --max-time 180 \
+            -o grype.tar.gz "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          echo 'e9da18cc1429e786722e32161288103600efffd8e483c90761f90485bd1bec85  grype.tar.gz' | sha256sum --check --strict
+          tar -xzf grype.tar.gz grype
+          echo "$RUNNER_TEMP/scanners" >> "$GITHUB_PATH"
+      - name: Record build and scanner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          syft version -o json > evidence/syft-version.json
+          grype version -o json > evidence/grype-version.json
+          python - <<'PY'
+          import json, os, subprocess
+          from datetime import datetime, timezone
+          with open('evidence/build.json', 'w') as f:
+              json.dump({'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+                         'workflow_sha':os.environ['GITHUB_SHA'],
+                         'run_id':os.environ['GITHUB_RUN_ID'],
+                         'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
+                         'recorded_at':datetime.now(timezone.utc).isoformat()}, f, indent=2)
+          PY
+      - name: Build disposable image without credentials or publication
+        id: image-build
+        run: |
+          docker build --pull --iidfile evidence/image-id.txt -t brrrtgate:security-scan .
+          docker image inspect --format '{{json .Id}}' brrrtgate:security-scan > evidence/image-config-digest.json
+      - name: Generate image SBOMs
+        run: |
+          syft docker:brrrtgate:security-scan \
+            -o syft-json=evidence/sbom.syft.json \
+            -o cyclonedx-json=evidence/sbom.cyclonedx.json
+      - name: Verify nonempty image inventory and matching build identity
+        run: |
+          python - <<'PYCODE'
+          import json, pathlib, re
+          image_id = pathlib.Path('evidence/image-id.txt').read_text().strip()
+          sbom = json.loads(pathlib.Path('evidence/sbom.syft.json').read_text())
+          cdx = json.loads(pathlib.Path('evidence/sbom.cyclonedx.json').read_text())
+          if not re.fullmatch(r'sha256:[0-9a-f]{64}', image_id):
+              raise SystemExit('Missing or malformed built image ID')
+          source = sbom.get('source', {})
+          if source.get('type') != 'image' or source.get('metadata', {}).get('imageID') != image_id:
+              raise SystemExit('SBOM source does not match the built image')
+          packages = sbom.get('artifacts')
+          if not isinstance(packages, list) or not packages:
+              raise SystemExit('SBOM has no package inventory')
+          if not all(isinstance(p, dict) and p.get('name') and p.get('type') for p in packages):
+              raise SystemExit('SBOM contains malformed package records')
+          if cdx.get('bomFormat') != 'CycloneDX' or not cdx.get('components'):
+              raise SystemExit('CycloneDX inventory missing')
+          pathlib.Path('evidence/inventory-validation.json').write_text(json.dumps(
+              {'image_id': image_id, 'packages': len(packages), 'validated': True}, indent=2))
+          PYCODE
+      - name: Update and record vulnerability database
+        run: |
+          grype db update
+          grype db status -o json > evidence/grype-db.json
+      - name: Gate known High and Critical image vulnerabilities
+        env:
+          GRYPE_DB_AUTO_UPDATE: 'false'
+        run: |
+          grype sbom:evidence/sbom.syft.json --fail-on high -o json --file evidence/grype.json
+      - name: Inspect final runtime components without network or writable image
+        if: ${{ !cancelled() && steps.image-build.outcome == 'success' }}
+        run: |
+          docker run --rm --network none --read-only \
+            --mount type=bind,src="$PWD/tools/security/image_components.py",dst=/image_components.py,readonly \
+            --entrypoint python brrrtgate:security-scan /image_components.py > evidence/runtime-components.json
+      - name: Preserve available evidence even when the gate fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-security-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove disposable image
+        if: always()
+        run: docker image rm brrrtgate:security-scan || true

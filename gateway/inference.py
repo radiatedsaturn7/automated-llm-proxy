@@ -14,6 +14,7 @@ from . import db, guardrails, policy, provider_health
 from .config import get_settings
 from .providers import StreamTranslator, response_headers as provider_response_headers, translate_response, upstream_request
 from .security import inference_identity
+from .request_json import parse as parse_request_json
 
 router = APIRouter()
 log = logging.getLogger("gateway")
@@ -137,6 +138,27 @@ async def finish_request(request, response, reservation_id, model, provider, rou
         pass
 
 
+
+async def abandon_predispatch(request, ticket):
+    if ticket is None:
+        return
+    # A disconnected caller's AnyIO cancellation scope must not cancel the DB
+    # cleanup. Retain it for overload accounting and graceful-shutdown draining.
+    task = asyncio.create_task(provider_health.abandon(ticket))
+    request.app.state.accounting_tasks.add(task)
+
+    def done(completed):
+        request.app.state.accounting_tasks.discard(completed)
+        if not completed.cancelled() and completed.exception() is not None:
+            log.error("Provider probe cleanup failed; lease expiry remains the fallback")
+
+    task.add_done_callback(done)
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        pass
+
+
 def provider_json(raw):
     """Reject ambiguous or non-finite provider JSON before normalization."""
     def pairs(items):
@@ -188,9 +210,9 @@ async def wait_stream_deadline(deadline):
 async def infer(request, endpoint):
     identity = await inference_identity(request)
     try:
-        payload = validate_payload(await request.json(), endpoint)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(400, "Invalid JSON") from exc
+        payload = validate_payload(parse_request_json(await request.body()), endpoint)
+    except (OverflowError, RecursionError):
+        raise HTTPException(400, "Invalid inference parameters") from None
     if get_settings().guardrails_output_enabled and payload.get("stream"):
         raise HTTPException(400, "Streaming is unavailable with output guardrails enabled")
     if (get_settings().guardrails_output_enabled and endpoint == "embeddings"
@@ -214,30 +236,34 @@ async def infer(request, endpoint):
     provider, health_ticket = await provider_health.choose(model, endpoint)
     route = provider.models[model]
     selected_provider = policy.provider_snapshot(provider, model)
+    client = request.app.state.upstream
     try:
-        url, headers, body = upstream_request(provider, route, payload, endpoint)
+        try:
+            url, headers, body = upstream_request(provider, route, payload, endpoint)
+            # Serialize before reserving or attributing failures to the provider.
+            # A local encoding/build failure proves no upstream dispatch occurred.
+            headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
+            headers["Accept-Encoding"] = "identity"
+            upstream = client.build_request("POST", url, headers=headers, json=body)
+        except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError, httpx.InvalidURL):
+            raise HTTPException(400, "Invalid or unsupported provider request") from None
         input_bound = policy.token_bound(payload)
         output_bound = payload.get("max_tokens", payload.get("max_completion_tokens", 0))
         amount = policy.price(input_bound * 2, output_bound * 2, route)
         reservation_id = await policy.reserve(identity, amount, input_bound + output_bound, model,
                                               selected_provider=selected_provider)
     except BaseException:
-        await provider_health.abandon(health_ticket)
+        await abandon_predispatch(request, health_ticket)
         raise
-    client = request.app.state.upstream
     response = None
     cfg = get_settings()
     deadline = time.monotonic() + (cfg.provider_stream_duration_seconds if payload.get("stream")
                                    else cfg.provider_response_duration_seconds)
     stream_deadline = deadline if payload.get("stream") else None
-    # Reject compression rather than decompressing attacker-controlled expansion
-    # before the decoded-byte cap can inspect it. Applies to every provider kind.
-    headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
-    headers["Accept-Encoding"] = "identity"
     try:
         with LATENCY.labels(endpoint).time():
             response = await asyncio.wait_for(
-                client.send(client.build_request("POST", url, headers=headers, json=body), stream=True),
+                client.send(upstream, stream=True),
                 timeout=max(0, deadline - time.monotonic()))
         if time.monotonic() >= deadline:
             raise TimeoutError("Provider response duration exceeded")

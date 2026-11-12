@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .inference import infer
+from .request_json import parse as parse_request_json
 
 router = APIRouter()
 
@@ -116,10 +117,7 @@ def response_envelope(data, model):
 
 @router.post('/v1/responses')
 async def create_response(request: Request):
-    try:
-        payload = chat_payload(await request.json())
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        raise HTTPException(400, 'Invalid JSON') from None
+    payload = chat_payload(parse_request_json(await request.body()))
     # Keep the same app/state/headers and cancellation context. No loopback HTTP,
     # persistent conversation, duplicate reservation or downstream credential.
     body = json.dumps(payload).encode()

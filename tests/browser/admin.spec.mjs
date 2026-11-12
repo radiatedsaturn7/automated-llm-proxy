@@ -208,7 +208,10 @@ test('fresh installation: real HTTP, bootstrap, administration, scoped keys and 
     await expect(memberPage).toHaveURL(/\/portal$/);
     await expect(memberPage.locator('#profile')).toContainText(user.email);
     expect((await memberContext.request.get('/account/api/profile')).status()).toBe(200);
+    const logoutResponse = memberPage.waitForResponse(response =>
+      response.url().endsWith('/auth/logout') && response.request().method() === 'POST');
     await memberPage.getByRole('button', { name: 'Sign out', exact: true }).click();
+    expect((await logoutResponse).status()).toBe(303);
     await expect(memberPage.locator('#profile')).toBeEmpty();
     expect((await memberContext.request.get('/account/api/profile')).status()).toBe(401);
     await memberPage.goto('/admin/static/local-login.html');

@@ -57,7 +57,10 @@ services, all SDK features, production capacity or deployment security.
 `e3b514392c2a798229af2c02889f89a71ad485ee`. Green checks do not imply release
 approval, and later round-17 changes are not covered by this run.
 
-## Latest completed acceptance (PR #23)
+## Historical completed acceptance (PR #23)
+
+The [exact-head evidence ledger](release-evidence.md) records subsequent verified
+increments. This PR #23 snapshot does not describe the latest repository head.
 
 [CI run 43139261994](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43139261994)
 passed all five jobs for branch head `11c7ebb44ece3fc36bdf7846865aba509049415e`:

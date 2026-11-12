@@ -1,6 +1,6 @@
 # SCIM provisioning
 
-Brrrtgate exposes a conservative SCIM 2.0 subset at `/scim/v2`. Authenticate with an expiring administrator API credential. This credential has administrative authority: protect it in your identity provider's secret store, limit its lifetime, and revoke it when the integration is removed. A dedicated limited-scope SCIM principal is not yet available.
+Brrrtgate exposes a conservative SCIM 2.0 subset at `/scim/v2`. Authenticate with an expiring, administrator-owned API key with only the `provisioning` permission. This scope permits SCIM operations but not general administrator APIs or inference. Protect it in your identity provider's secret store, limit its lifetime, and revoke it when the integration is removed. An administrator-owned key with `admin` scope is also accepted for compatibility but is broader than needed.
 
 Supported: authenticated ServiceProviderConfig, ResourceTypes and Schemas discovery; list/get/create Users and Groups; userName/displayName/externalId exact equality filters; pagination up to 100 resources; persistent unique externalId; User PATCH replace active/userName/externalId; User DELETE as audited deactivation; User PUT replacement; Group PATCH add/replace/remove members, exact `members[value eq "id"]` removal, displayName rename and externalId updates. Up to 20 operations execute atomically. A user belongs to one gateway team. Conflicting team assignment is rejected instead of silently moving access. Administrator accounts and teams containing them cannot be changed through SCIM. Unsupported attributes/operations fail explicitly, not silently.
 
@@ -14,4 +14,29 @@ User PUT requires the supported core User schema and an email `userName`. Omitte
 
 Group PATCH accepts case-insensitive operation verbs and case-sensitive supported attribute paths. `add members` takes an array of member objects; `replace members` replaces the entire membership; `remove members` without a value clears membership. To remove one member, use `{"op":"remove","path":"members[value eq \"USER_UUID\"]"}`. Removing a missing member is idempotent. Complex/arbitrary filters, nested groups and multiple-team membership management through SCIM remain unsupported. Explicit secondary memberships use the separate team API and must be reconciled separately; see team-delegation.md. Attribute-less add/replace objects can contain `displayName`, `externalId` and `members`. Unsupported operations or a later failure roll back all preceding changes, including credential revocations.
 
-Discovery describes only the implemented core subset and is bounded to User and Group resources. Common SCIM fields/extensions such as `name`, `emails`, enterprise department attributes and password are not accepted; configure your IdP mappings accordingly rather than assuming full standards or vendor certification. Group PUT/DELETE remain unsupported. The API deliberately protects all administrator accounts and groups containing them from SCIM modification.
+Discovery describes only the implemented core subset and is bounded to User and Group resources. Common SCIM fields/extensions such as `name`, `emails`, enterprise department attributes and password are not accepted; configure your IdP mappings accordingly rather than assuming full standards or vendor certification. Group PUT replacement is supported as described below; Group DELETE remains unsupported. The API deliberately protects all administrator accounts and groups containing them from SCIM modification.
+
+
+## Group replacement
+
+Group PUT requires the core Group schema and a valid `displayName`; optional `id`
+must match the URL. Omitted `members` clears primary membership; omitted `externalId`
+clears that attribute. Server-owned `meta` is ignored. Budgets and enabled state are
+not writable through this endpoint. The complete replacement is atomic, including
+revocations, and a rejected member or uniqueness conflict rolls it back.
+
+Removing a primary member also removes any duplicate explicit membership in that same
+team, so a duplicate binding cannot preserve the access just removed. Unrelated explicit
+secondary memberships remain separately managed. Primary membership changes conservatively
+revoke all affected users' credentials and sessions, as before; re-adding does not revive
+revoked credentials. PUT/PATCH cannot reactivate disabled teams.
+
+PUT/PATCH reject groups containing a global administrator as either primary or explicit
+member, or any explicit team-administrator membership. SCIM cannot dismantle those
+administration grants or escalate roles. Mutations revalidate the caller's live provisioning
+permission inside the policy transaction, serializing with revocation.
+
+Group DELETE is intentionally **unsupported**. A disabled gateway team is not a deleted
+SCIM resource. Physical deletion would damage historical references, and soft-deactivation
+without proper tombstone/recreation semantics would mislead IdP reconciliation. Manage
+team deactivation through administrator APIs until explicit SCIM deletion semantics exist.

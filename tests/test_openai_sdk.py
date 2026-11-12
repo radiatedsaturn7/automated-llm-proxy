@@ -138,3 +138,30 @@ async def test_sdk_upstream_error_no_retry_or_secret(client, admin_headers):
         assert 'upstream-private-data' not in str(caught.value)
     assert len(calls) == 1
     assert (await ledger())[0].estimated
+
+
+async def test_sdk_responses_client_owned_history_roundtrip(client, admin_headers):
+    _, key, _ = await setup_inference(client, admin_headers)
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json=completion())
+
+    await mock_upstream(handler)
+    async with sdk(key["key"]) as api:
+        first = await api.responses.create(model="chat", input="hi", store=False, max_output_tokens=16)
+        history = [
+            {"role": "user", "content": "hi"},
+            *[item.model_dump() for item in first.output],
+            {"role": "user", "content": "continue"},
+        ]
+        second = await api.responses.create(model="chat", input=history, store=False, max_output_tokens=16)
+        assert second.output_text == "hello"
+    assert seen[1]["messages"] == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "continue"},
+    ]
+    assert len(seen) == 2
+    assert len(await ledger(2)) == 2

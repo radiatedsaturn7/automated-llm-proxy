@@ -8,20 +8,27 @@ plan before admitting sensitive traffic.
 
 ## Evidence checkpoint
 
-Latest verified candidate: PR #16 at exact head
-`7acaa9848d9c9873678bd0a31750a5a05bb11589`.
-[CI run 43125212538](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43125212538)
-passed all five jobs: **613 Python tests passed / 8 skipped**, **621 PostgreSQL
-tests passed**, logical backup/restore acceptance passed, **23 Chromium tests
-passed**, **2 actual Keycloak tests passed**, and deployment/monitoring checks
-passed. Dependency audit found no known vulnerabilities. The SDK contracts use
-pinned OpenAI Python 3.49.0 and real ASGI gateway processing with simulated
-upstream responses. No paid provider calls were made.
+Latest verified checkpoint: PR #21 at exact head
+`983572428fa11fb59a8da2b74a0995d6cbc0ae6d`, merged as
+`46f071c526f4e4e38168dfea40cc083438e11164`.
+[CI run 43135584872](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43135584872)
+passed all five jobs: **717 Python tests passed / 8 skipped**, **725 PostgreSQL
+tests passed**, logical backup/restore acceptance passed, **27 Chromium tests
+passed**, actual Keycloak tests and deployment/monitoring checks passed.
+Dependency audit found no known vulnerabilities. SDK contracts use pinned OpenAI
+Python 3.49.0 and real ASGI gateway processing with simulated upstream responses.
+No paid provider calls were made.
 
-**PR #16 merged as `7af1ab65c351cf658ff24226a4339dc4087b512c`.**
-PR #15 was approved and merged as `e3b514392c2a798229af2c02889f89a71ad485ee`.
-Green CI is not production acceptance or permission to merge. Later round-17
-changes require their own exact-head evidence.
+This checkpoint includes local TOTP, mounted-secret validation, OIDC authority
+reconciliation, fenced maintenance encryption rotation, and invalid-agent-proof
+preflight. The two-replica rotation drill verified a dry run, stale-replica
+rejection without writes or upstream dispatch, successful target-key inference,
+reverse rotation and preservation of uncertain pending reservations. Only
+synthetic test keys were used; no production keys were changed. Signing-key
+migration remains unsupported.
+
+Green CI is not production acceptance. Changes after this checkpoint require
+their own exact-head evidence before merge; inspect the relevant pull request.
 
 The repeated two-distinct-process drill reported 40 budget requests with five
 accepted/35 denied and 3,370 microdollars held against a 4,000 limit; 32 rate

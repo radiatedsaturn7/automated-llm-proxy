@@ -356,6 +356,14 @@ def gemini_response(data, model):
             'usage': gemini_usage(data)}
 
 
+def anthropic_finish(reason):
+    if reason in {'max_tokens', 'model_context_window_exceeded'}:
+        return 'length'
+    if reason == 'refusal':
+        return 'content_filter'
+    return 'tool_calls' if reason == 'tool_use' else 'stop'
+
+
 def response_headers(response, request_id):
     """Forward opaque correlation IDs, never arbitrary upstream headers or error text."""
     headers = {"X-Reservation-ID": request_id, "Cache-Control": "no-store"}
@@ -387,16 +395,20 @@ def translate_response(provider, data, model, endpoint=None, payload=None):
         return translated
     message = anthropic_content(data.get("content", []))
     reason = data.get("stop_reason")
-    if reason not in {"end_turn", "stop_sequence", "max_tokens", "tool_use"}:
+    if reason not in {"end_turn", "stop_sequence", "max_tokens", "tool_use", "refusal", "model_context_window_exceeded"}:
         raise ValueError("Unsupported Anthropic stop reason")
-    if (reason == 'tool_use') != bool(message.get('tool_calls')) and reason != 'max_tokens':
+    if (reason == 'tool_use') != bool(message.get('tool_calls')) and reason not in {'max_tokens', 'model_context_window_exceeded', 'refusal'}:
         raise ValueError('Tool content and stop reason mismatch')
+    if reason == 'refusal':
+        # Never expose tool calls as executable after a refusal. Preserve only
+        # the refusal text, without forwarding provider stop_details metadata.
+        message = {'role': 'assistant', 'content': None, 'refusal': message.get('content') or ''}
     usage = data.get("usage")
     usage = usage if isinstance(usage, dict) else {}
     input_tokens, output_tokens = usage.get("input_tokens"), usage.get("output_tokens")
     return {"id": data.get("id", ""), "object": "chat.completion", "model": model,
             "choices": [{"index": 0, "message": message,
-                         "finish_reason": "length" if reason == "max_tokens" else ("tool_calls" if reason == "tool_use" else "stop")}],
+                         "finish_reason": anthropic_finish(reason)}],
             "usage": {"prompt_tokens": input_tokens, "completion_tokens": output_tokens,
                       "total_tokens": (input_tokens + output_tokens if isinstance(input_tokens, int) and isinstance(output_tokens, int) else None)}}
 
@@ -520,14 +532,14 @@ class StreamTranslator:
             if any(not b['closed'] for b in self.anthropic_blocks.values()):
                 raise ValueError('Unclosed content block')
             reason = event.get('delta', {}).get('stop_reason')
-            if reason not in {'end_turn', 'stop_sequence', 'max_tokens', 'tool_use'}:
+            if reason not in {'end_turn', 'stop_sequence', 'max_tokens', 'tool_use', 'refusal', 'model_context_window_exceeded'}:
                 raise ValueError('Unsupported Anthropic stop reason')
-            if (reason == 'tool_use') != bool(self.anthropic_ids) and reason != 'max_tokens':
+            if (reason == 'tool_use') != bool(self.anthropic_ids) and reason not in {'max_tokens', 'model_context_window_exceeded', 'refusal'}:
                 raise ValueError('Tool content and stop reason mismatch')
             out = event.get('usage', {}).get('output_tokens')
             self.usage = {'prompt_tokens': self.input_tokens, 'completion_tokens': out,
                           'total_tokens': (self.input_tokens + out if isinstance(self.input_tokens, int) and isinstance(out, int) else None)}
-            finish = 'length' if reason == 'max_tokens' else ('tool_calls' if reason == 'tool_use' else 'stop')
+            finish = anthropic_finish(reason)
             self.anthropic_finished = True
         elif kind == 'message_stop':
             if not self.anthropic_finished:

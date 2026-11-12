@@ -218,3 +218,89 @@ async def test_ambiguous_or_nonfinite_sse_json_rejected(raw):
     response = httpx.Response(200, content=('data: '+raw+'\n\n').encode())
     with pytest.raises(ValueError):
         _ = [chunk async for chunk in translator.iterate(response)]
+
+
+@pytest.mark.parametrize(
+    "reason,finish", [("refusal", "content_filter"), ("model_context_window_exceeded", "length")]
+)
+def test_known_terminal_states_preserve_usage(reason, finish):
+    data = response_data()
+    data["content"] = [{"type": "text", "text": "Cannot continue"}]
+    data["stop_reason"] = reason
+    data["stop_details"] = {"explanation": "private provider metadata"}
+    result = providers.translate_response(PROVIDER, data, "alias")
+    assert result["choices"][0]["finish_reason"] == finish
+    assert result["usage"]["total_tokens"] == 30
+    assert "private provider metadata" not in str(result)
+    if reason == "refusal":
+        assert result["choices"][0]["message"] == {
+            "role": "assistant",
+            "content": None,
+            "refusal": "Cannot continue",
+        }
+
+
+def test_refusal_never_exposes_executable_tool_calls():
+    data = response_data()
+    data["stop_reason"] = "refusal"
+    result = providers.translate_response(PROVIDER, data, "alias")
+    assert "tool_calls" not in result["choices"][0]["message"]
+    assert result["choices"][0]["finish_reason"] == "content_filter"
+
+
+@pytest.mark.parametrize(
+    "reason,finish", [("refusal", "content_filter"), ("model_context_window_exceeded", "length")]
+)
+async def test_terminal_stream_no_replay_preserves_accounting(reason, finish):
+    sequence = events()
+    sequence[-2]["delta"]["stop_reason"] = reason
+    translator, chunks = await stream(sequence)
+    result = [json.loads(c.decode()[6:]) for c in chunks[:-1]]
+    # Earlier text/tool deltas cannot be retracted; consumers must wait for final
+    # tool_calls finish before executing any accumulated tool arguments.
+    assert result[-1]["choices"][0]["finish_reason"] == finish
+    assert translator.complete and translator.usage["total_tokens"] == 30
+    assert chunks[-1] == b"data: [DONE]\n\n"
+
+
+@pytest.mark.parametrize("reason", ["refusal", "model_context_window_exceeded"])
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_known_terminal_gateway_single_dispatch_and_settlement(
+    client, admin_headers, reason, streaming
+):
+    from sqlalchemy import select
+    from gateway import db
+    from test_gateway import setup_inference, mock_upstream
+
+    headers, _, registered = await setup_inference(client, admin_headers)
+    async with db.transaction() as session:
+        (await session.get(db.Provider, registered["id"])).kind = "anthropic"
+    sent = []
+
+    def handler(req):
+        sent.append(req)
+        if streaming:
+            sequence = events()
+            sequence[-2]["delta"]["stop_reason"] = reason
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content="".join("data: " + json.dumps(event) + "\n\n" for event in sequence),
+            )
+        data = response_data()
+        data["stop_reason"] = reason
+        return httpx.Response(200, json=data)
+
+    await mock_upstream(handler)
+    result = await client.post(
+        "/v1/chat/completions", headers=headers, json={**CHAT, "model": "chat", "stream": streaming}
+    )
+    assert result.status_code == 200 and len(sent) == 1
+    assert ("content_filter" if reason == "refusal" else "length") in result.text
+    if streaming:
+        assert "data: [DONE]" in result.text and '"error"' not in result.text
+    async with db.session_factory() as session:
+        usage = (await session.scalars(select(db.Usage))).one()
+        assert usage.input_tokens == 20 and usage.output_tokens == 10 and not usage.estimated
+        reservation = (await session.scalars(select(db.Reservation))).one()
+        assert reservation.status == "settled"

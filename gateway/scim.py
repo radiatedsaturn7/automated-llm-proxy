@@ -1,4 +1,4 @@
-"""Conservative SCIM 2.0 provisioning subset. One group (team) per user."""
+"""Conservative SCIM 2.0 provisioning subset. One SCIM primary group per user."""
 
 import re
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -375,7 +375,12 @@ async def set_members(session, group, members):
     current = (await session.scalars(select(db.User).where(db.User.team_id == group.id))).all()
     if any(u.role == "admin" for u in current):
         fail("Administrator teams must be managed through administration", 403)
-    changed = {u.id for u in current if u.id not in ids} | {u.id for u in users if u.team_id != group.id}
+    removed = {u.id for u in current if u.id not in ids}
+    # A duplicate explicit binding must not preserve access removed by SCIM.
+    if removed:
+        await session.execute(delete(db.TeamMembership).where(
+            db.TeamMembership.team_id == group.id, db.TeamMembership.user_id.in_(removed)))
+    changed = removed | {u.id for u in users if u.team_id != group.id}
     for user in current:
         await mark_managed(session, user)
         if user.id not in ids:
@@ -430,6 +435,37 @@ def group_name(value):
     return value
 
 
+async def protected_group(session, group):
+    primary_admin = await session.scalar(select(db.User.id).where(
+        db.User.team_id == group.id, db.User.role == "admin").limit(1))
+    explicit_admin = await session.scalar(select(db.TeamMembership.user_id).join(
+        db.User, db.User.id == db.TeamMembership.user_id).where(
+        db.TeamMembership.team_id == group.id,
+        (db.TeamMembership.role == "admin") | (db.User.role == "admin")).limit(1))
+    if primary_admin or explicit_admin:
+        fail("Administrator teams must be managed through administration", 403)
+
+
+@router.put("/Groups/{resource_id}")
+async def replace_group(resource_id: str, request: Request, identity: Identity = Depends(provisioning)):
+    body = await payload(request, {"schemas", "id", "meta", "displayName", "members", "externalId"})
+    if body.get("schemas") != [GROUP] or body.get("id", resource_id) != resource_id:
+        fail("Invalid replacement group schema or id")
+    name, external_id = group_name(body.get("displayName")), external(body.get("externalId"))
+    async with db.transaction() as session:
+        await revalidate_provisioning(session, identity)
+        group = await session.get(db.Team, resource_id)
+        if not group:
+            fail("Resource not found", 404)
+        await protected_group(session, group)
+        if not group.enabled:
+            fail("Disabled teams require explicit administrator reactivation", 409)
+        group.name, group.scim_external_id = name, external_id
+        await set_members(session, group, body.get("members", []))
+        await db.audit(session, identity.user.id, "scim.group.replace", group.id)
+        return await group_resource(session, group)
+
+
 @router.put("/Users/{resource_id}")
 async def replace_user(resource_id: str, request: Request, identity: Identity = Depends(provisioning)):
     body = await payload(request, {"schemas", "id", "meta", "userName", "active", "externalId"})
@@ -465,10 +501,9 @@ async def patch_group(resource_id: str, request: Request, identity: Identity = D
         group = await session.get(db.Team, resource_id)
         if not group:
             fail("Resource not found", 404)
-        if await session.scalar(
-            select(db.User.id).where(db.User.team_id == group.id, db.User.role == "admin").limit(1)
-        ):
-            fail("Administrator teams must be managed through administration", 403)
+        await protected_group(session, group)
+        if not group.enabled:
+            fail("Disabled teams require explicit administrator reactivation", 409)
         for op in ops:
             if op.get("path") is not None and not isinstance(op["path"], str):
                 fail("Patch path must be a string")

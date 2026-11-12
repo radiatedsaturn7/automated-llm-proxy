@@ -136,3 +136,24 @@ async def test_logout_ages_out_while_waiting_for_writer_gate(client, logout, mon
     response = await send(client, signed(logout))
     assert response.status_code == 400, response.text
     assert len(await sessions()) == 5
+
+
+async def test_fast_maintenance_clock_cannot_reopen_live_logout_replay(client, logout, monkeypatch):
+    from gateway.maintenance import cleanup
+    token = signed(logout)
+    assert (await send(client, token)).status_code == 200
+    current = db.now()
+    # Simulate a different cleanup process ten minutes ahead, while the IdP and
+    # authenticating replicas remain correctly synchronized.
+    with monkeypatch.context() as patch:
+        patch.setattr(db, 'now', lambda: current + timedelta(minutes=11))
+        result = await cleanup(apply=True)
+    async with db.transaction() as s:
+        user = await s.scalar(select(db.User))
+        s.add(db.BrowserSession(digest='post-cleanup', user_id=user.id, csrf='csrf',
+            expires_at=current + timedelta(hours=1), oidc_issuer='https://id.example',
+            oidc_subject='one', oidc_sid='a'))
+    auth.clear_oidc_cache()
+    assert (await send(client, token)).status_code == 200
+    assert 'post-cleanup' in await sessions()
+    assert result['eligible_in_batch']['oidc_logout_replays'] == 0

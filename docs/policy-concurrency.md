@@ -68,3 +68,11 @@ Rate-bucket maintenance also samples the database clock inside its exclusive
 transaction, retaining at least one day of buckets. A fast maintenance replica
 cannot delete the active minute bucket and reopen its allowance. Other transient
 session/authentication cleanup continues to use application time.
+
+Maintenance also uses the shared database clock to expire OIDC logout replay
+records, preventing a fast cleanup host from erasing a live logout fence and
+allowing an otherwise valid replay to revoke a newer session. This narrow cleanup
+protection does not change JWT validation, fence issuance, or authentication's
+application-clock assumptions: keep authentication replicas, the IdP and database
+hosts synchronized. Other transient session/MFA cleanup remains application-clock
+based and may expire availability early if its host clock is fast.

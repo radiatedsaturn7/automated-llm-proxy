@@ -49,3 +49,28 @@ lock. Dependency audit checks currently known advisories, not the absence of
 vulnerabilities. A lock must be refreshed deliberately when fixes are published;
 it is not an automatic patch service. No image publication, deployment or
 credential access is performed by this change.
+
+## Container build backend
+
+Runtime locks do not cover PEP 517 build isolation. The container therefore also
+uses `requirements-build.lock`, generated from `requirements-build.in` (which
+must match `pyproject.toml`'s build-system requirements). It pins and hashes all
+build-backend transitive dependencies. The builder installs this lock before
+installing the project with `--no-build-isolation --no-deps`, so pip cannot
+silently download a newer backend during application installation. Backend
+packages are installed only in the builder, outside `/install`; they are not
+copied into the runtime image.
+
+Update deliberately with the repository's CI-pinned uv version:
+
+```sh
+uv pip compile --python-version 3.12 --generate-hashes --no-header --only-binary :all: --upgrade requirements-build.in -o requirements-build.lock
+```
+
+Review the changed versions and hashes. CI installs the lock in a clean virtual
+environment, verifies dependency consistency, audits every locked package, and
+builds the application wheel without build isolation. The normal Docker build,
+browser/identity acceptance and runtime tests still apply. Neither a hash nor a
+clean advisory scan proves a package is trustworthy; this closes an unpinned
+build-dependency path, not all software supply-chain risks. Direct non-container
+source installs still use their caller's build-isolation configuration.

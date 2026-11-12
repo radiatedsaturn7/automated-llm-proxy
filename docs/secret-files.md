@@ -96,7 +96,7 @@ multi-file hot-rotation protocol.
 
 ## Container build inputs
 
-The application Dockerfile copies only `requirements.lock`, `pyproject.toml`,
+The application Dockerfile copies only `requirements.lock`, `requirements-build.lock`, `pyproject.toml`,
 `LICENSE`, and `gateway/` into its builder. Unrelated root-level local files,
 configuration, database backups and deployment secrets are not copied into
 builder layers. The final image receives only the installed application and

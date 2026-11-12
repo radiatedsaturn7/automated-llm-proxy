@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Integer, MetaData, Table, inspect, select, text
 
 from . import db
-from .migrations import HEAD, REVISIONS, v0001, v0002, v0003, v0004, v0005, v0006, v0007, v0008, v0009, v0010, v0011, v0012, v0013, v0014, v0015, v0016
+from .migrations import HEAD, REVISIONS, v0001, v0002, v0003, v0004, v0005, v0006, v0007, v0008, v0009, v0010, v0011, v0012, v0013, v0014, v0015, v0016, v0017
 
 version_metadata = MetaData()
 versions = Table("gateway_schema_versions", version_metadata,
@@ -45,7 +45,7 @@ def validate_v1(connection):
 
 
 def validate_head(connection):
-    validate_schema(connection, v0016.metadata)
+    validate_schema(connection, v0017.metadata)
 
 
 def validate_schema(connection, expected):
@@ -105,7 +105,7 @@ def _upgrade(connection, adopt_v1=False):
     if not applied and set(inspect(connection).get_table_names()) != {versions.name}:
         raise MigrationError("Schema exists without revision history; refusing partial initialization")
     if applied:
-        validate_schema(connection, {1: v0001.Base.metadata, 2: v0002.metadata, 3: v0003.metadata, 4: v0004.metadata, 5: v0005.metadata, 6: v0006.metadata, 7: v0007.metadata, 8: v0008.metadata, 9: v0009.metadata, 10: v0010.metadata, 11: v0011.metadata, 12: v0012.metadata, 13: v0013.metadata, 14: v0014.metadata, 15: v0015.metadata, 16: v0016.metadata}[applied[-1]])
+        validate_schema(connection, {1: v0001.Base.metadata, 2: v0002.metadata, 3: v0003.metadata, 4: v0004.metadata, 5: v0005.metadata, 6: v0006.metadata, 7: v0007.metadata, 8: v0008.metadata, 9: v0009.metadata, 10: v0010.metadata, 11: v0011.metadata, 12: v0012.metadata, 13: v0013.metadata, 14: v0014.metadata, 15: v0015.metadata, 16: v0016.metadata, 17: v0017.metadata}[applied[-1]])
     for number, revision in REVISIONS:
         if number not in applied:
             revision.upgrade(connection)

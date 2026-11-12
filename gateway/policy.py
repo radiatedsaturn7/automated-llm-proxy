@@ -78,7 +78,8 @@ async def reserve(identity, amount, tokens, model, *, selected_provider=None):
                 db.Reservation.status == "pending"))
             if spent + pending + amount > entity.budget_micros:
                 raise HTTPException(429, f"{field[:-3].title()} monthly budget exceeded")
-        bucket_id = key.id + ":" + admitted_at.strftime("%Y%m%d%H%M")
+        family = "member:" + user.id if key.self_service else key.id
+        bucket_id = family + ":" + admitted_at.strftime("%Y%m%d%H%M")
         bucket = await s.get(db.RateBucket, bucket_id)
         if bucket is None:
             bucket = db.RateBucket(id=bucket_id, requests=0, tokens=0)
@@ -105,6 +106,10 @@ async def inherit_rotation_allowance(session, previous, replacement):
     Copy only the current shared-DB minute: prior windows must not penalize the
     replacement, and a boundary crossed after this sample starts a fresh window.
     """
+    if previous.self_service:
+        from .member_keys import inherit_member_origin
+        await inherit_member_origin(session, previous, replacement)
+        return
     minute = (await db.database_now(session)).strftime("%Y%m%d%H%M")
     bucket = await session.get(db.RateBucket, previous.id + ":" + minute)
     if bucket is not None:

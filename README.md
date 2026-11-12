@@ -95,3 +95,5 @@ Schema changes use serialized versioned migrations. Databases created by the ini
 ## License
 
 Apache License 2.0. No paid enterprise feature tier. Contributions welcome; do not commit secrets or customer prompts. Report security defects privately to the repository maintainer rather than including exploit details or secrets in public issues.
+
+Member credential issuance: [default-off policy-controlled key creation](docs/member-key-creation.md).

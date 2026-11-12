@@ -12,16 +12,18 @@ async def cleanup(*, apply=False, batch_size=1000):
     if not 1 <= batch_size <= 10000:
         raise ValueError("batch_size must be between 1 and 10000")
     cutoff = db.now()
-    # Retain at least a day of rate buckets. Budget/accounting history is untouched.
-    bucket_cutoff = (cutoff - timedelta(days=1)).strftime("%Y%m%d%H%M")
     targets = [
         (db.OIDCState, db.OIDCState.digest, db.OIDCState.expires_at < cutoff),
         (db.OIDCLogoutReplay, db.OIDCLogoutReplay.digest, db.OIDCLogoutReplay.expires_at < cutoff),
         (db.BrowserSession, db.BrowserSession.digest, db.BrowserSession.expires_at < cutoff),
-        (db.RateBucket, db.RateBucket.id, func.substr(db.RateBucket.id, func.length(db.RateBucket.id) - 11) < bucket_cutoff),
     ]
     counts = {}
     async with db.transaction() as session:
+        # Admission buckets use the shared clock. A fast maintenance replica
+        # must not delete a live bucket and reopen its rate allowance.
+        bucket_cutoff = ((await db.database_now(session)) - timedelta(days=1)).strftime("%Y%m%d%H%M")
+        targets.append((db.RateBucket, db.RateBucket.id,
+                        func.substr(db.RateBucket.id, func.length(db.RateBucket.id) - 11) < bucket_cutoff))
         for model, key, predicate in targets:
             ids = list((await session.scalars(select(key).where(predicate).order_by(key).limit(batch_size))).all())
             counts[model.__tablename__] = len(ids)

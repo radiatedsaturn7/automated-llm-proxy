@@ -44,3 +44,27 @@ operations on both backends. With `TEST_DATABASE_URL` set to a disposable Postgr
 database, it additionally checks independent-team progress, same-team budget
 visibility after lock waits, and revocation serialization. The shared test fixture
 resets that database. These tests check correctness and progress, not performance.
+
+## Admission time and clock synchronization
+
+After acquiring the team/user/key subject locks, admission samples the database
+wall clock once. PostgreSQL uses `clock_timestamp()`, not transaction-start time,
+so waiting for a lock cannot retain an outdated admission timestamp. This same UTC
+sample determines credential expiry at admission, the monthly budget period and
+the per-key minute rate bucket. Settlement retains the reservation's original
+period even if it completes in a later month. SQLite development installations
+use SQLite's current timestamp (second precision).
+
+Replica-local clock skew therefore cannot split financial admission across
+budget periods or rate buckets. This is not a replacement for synchronized clocks
+(NTP): initial authentication, JWT validation/issuance, and record timestamps still
+use application clocks. A fast application clock may reject a credential early;
+passing initial authentication never skips the database-time admission expiry
+check. Fixed-window rate limits still allow bursts straddling a minute boundary;
+this change does not turn them into sliding-window limits. Keep database hosts'
+clocks synchronized as well, including across database failover.
+
+Rate-bucket maintenance also samples the database clock inside its exclusive
+transaction, retaining at least one day of buckets. A fast maintenance replica
+cannot delete the active minute bucket and reopen its allowance. Other transient
+session/authentication cleanup continues to use application time.

@@ -3,7 +3,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, select, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -13,6 +13,14 @@ from .config import get_settings
 
 def now():
     return datetime.now(timezone.utc)
+
+
+async def database_now(session):
+    """Shared wall clock sampled when executed, not at transaction start."""
+    dialect = session.get_bind().dialect.name
+    value = await session.scalar(select(
+        func.clock_timestamp() if dialect == "postgresql" else func.current_timestamp()))
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def uid():

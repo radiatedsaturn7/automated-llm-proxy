@@ -53,7 +53,9 @@ async def reserve(identity, amount, tokens, model, *, selected_provider=None):
         if key is None:
             raise HTTPException(401, "Credential changed")
         team, user, key = await db.lock_policy_subjects(s, key.team_id, key.user_id, key.id)
-        if not key or key.revoked or aware(key.expires_at) <= db.now() or not user or not user.enabled:
+        # Sample after contention: transaction-start time can predate a lock wait.
+        admitted_at = await db.database_now(s)
+        if not key or key.revoked or aware(key.expires_at) <= admitted_at or not user or not user.enabled:
             raise HTTPException(401, "Credential changed")
         if key.kind != "agent" and "inference" not in key.permissions:
             raise HTTPException(403, "Inference permission required")
@@ -65,7 +67,7 @@ async def reserve(identity, amount, tokens, model, *, selected_provider=None):
             raise HTTPException(403, "Model not allowed by key")
         if key.team_id and (not team or not team.enabled or team.deleted_at is not None):
             raise HTTPException(403, "Team disabled")
-        period = db.now().strftime("%Y-%m")
+        period = admitted_at.strftime("%Y-%m")
         for entity, field in [(user, "user_id"), (team, "team_id")]:
             if entity is None or entity.budget_micros is None:
                 continue
@@ -76,7 +78,7 @@ async def reserve(identity, amount, tokens, model, *, selected_provider=None):
                 db.Reservation.status == "pending"))
             if spent + pending + amount > entity.budget_micros:
                 raise HTTPException(429, f"{field[:-3].title()} monthly budget exceeded")
-        bucket_id = key.id + ":" + db.now().strftime("%Y%m%d%H%M")
+        bucket_id = key.id + ":" + admitted_at.strftime("%Y%m%d%H%M")
         bucket = await s.get(db.RateBucket, bucket_id)
         if bucket is None:
             bucket = db.RateBucket(id=bucket_id, requests=0, tokens=0)

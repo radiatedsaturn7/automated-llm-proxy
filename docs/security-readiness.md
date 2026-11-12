@@ -203,3 +203,10 @@ recovery checklist, and remaining signing-key limitations, see
 [encryption key operations](encryption-key-operations.md). Mounted secret delivery
 is not automatic key rotation; rehearse the complete procedure on a restored
 copy before any deployment-key change.
+
+## Dependency acceptance
+
+Python/PostgreSQL CI now tests the locked runtime versions used in the container,
+rejects stale runtime exports, and retains a bounded package inventory after a
+successful audit. See [dependency verification](dependencies.md) for deliberate
+update steps and remaining image/build/provenance limitations.

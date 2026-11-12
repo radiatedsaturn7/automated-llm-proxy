@@ -29,6 +29,8 @@ async def exchange(request: Request):
     authorization = request.headers.get("authorization", "")
     if not authorization.startswith("Bearer lg_"):
         raise HTTPException(401, "Agent credential required")
+    from .agent_rotation import preflight
+    await preflight(digest(authorization[7:]))
     async with db.transaction() as s:
         key = await s.scalar(select(db.APIKey).where(db.APIKey.digest == digest(authorization[7:])))
         if not key or key.kind != "agent" or key.revoked or aware(key.expires_at) <= db.now():

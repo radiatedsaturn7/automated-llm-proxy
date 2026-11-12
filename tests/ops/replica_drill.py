@@ -201,6 +201,9 @@ def run():
         'replayed_upstream_requests': 0, 'surviving_and_recovered': summary(healthy)}
     report['accounting'] = {'settled_requests': len(usage), 'pending_requests': 1, 'settled_micros': sum(r['cost_micros'] for r in usage)}
     report['resources_after_recovery'] = resources()
+    STAGE = 'graceful_drain'
+    from drain_drill import run_drain
+    report['graceful_drain'] = run_drain(docker, http, call, control, admin, survivor['key'])
     STAGE = 'offline_master_key_rotation'
     from rotation_drill import run_rotation
     report['master_key_rotation'] = run_rotation(docker, http, call, control, admin, survivor['key'])

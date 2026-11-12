@@ -174,3 +174,49 @@ receiving headers before ASGI dispatch, memory buffered by the ASGI server, or
 aggregate connections. This is not standalone denial-of-service protection.
 Clients receiving a 408 should establish a fresh connection; do not automatically
 replay ambiguous provider requests based on unrelated provider timeouts.
+
+## Graceful process and pod shutdown
+
+The supported `python -m gateway.cli` entry point sets Uvicorn's request-drain
+window to `SHUTDOWN_GRACE_SECONDS` (default **360 seconds**, integer 1–3600).
+`--shutdown-grace-seconds` explicitly overrides that environment value. Invalid
+values fail before the server starts. Directly running another ASGI server or
+`uvicorn gateway.main:app` bypasses this CLI setting: configure that server's
+shutdown behavior yourself.
+
+On SIGTERM, Uvicorn closes its listeners and idle connections, then lets existing
+requests finish within the request-drain window. It cancels unfinished request
+tasks when the window expires. This is not a guarantee that an upstream call was
+never processed. Interrupted inference is not replayed automatically; existing
+conservative accounting/uncertain reservations still apply. The lifespan then
+waits for cancelled HTTP tasks to finish scheduling cleanup, then drains retained
+accounting tasks before closing upstream/database clients. Do
+not replace this ordering with immediate resource disposal or blanket refunds.
+
+The Helm chart defaults to a **10-second preStop delay**, **360-second request
+drain**, and **420-second total pod termination grace**. The pod remains serving
+during preStop to allow terminating-endpoint changes to propagate; no public
+shutdown endpoint is introduced. The delay is a configurable allowance, not a
+proof that your ingress has stopped routing traffic. Kubernetes counts preStop
+inside the total termination grace. Chart rendering rejects totals smaller than
+`preStopDelaySeconds + shutdownGraceSeconds + 30`, and rejects a competing
+`SHUTDOWN_GRACE_SECONDS` in `extraEnv`. Use the dedicated chart values together.
+Set `preStopDelaySeconds: 0` only when your traffic-drain arrangement permits it.
+
+Compose defaults the app's `stop_grace_period` to **420s** and forwards
+`SHUTDOWN_GRACE_SECONDS` (default 360). If overriding
+`GATEWAY_STOP_GRACE_PERIOD`, retain enough time for request drain and accounting;
+Compose does not enforce the Helm relationship. External `docker stop -t`, job
+supervisors, node eviction and service-manager deadlines can override these
+allowances.
+
+The 30-second chart minimum is a configuration safety margin, **not a bound on
+database finalization**. Size the remaining window for your configured DB
+pool/lock/statement deadlines and traffic. If DB access is broken or shutdown
+exceeds the platform deadline, SIGKILL can leave conservative pending
+reservations. Reconcile against provider billing; never automatically release
+ambiguous charges. Raising provider/stream duration above the request-drain
+window intentionally permits truncation during shutdown. Test your chosen
+window, ingress propagation, long streams and database failures on the actual
+deployment. Disposable signal tests do not prove Kubernetes zero-downtime,
+managed-database failover, or a production SLA.

@@ -43,7 +43,10 @@ resources:
   limits:
     cpu: '2'
     memory: 1Gi
-terminationGracePeriodSeconds: 90
+# Pod budget includes preStop + request drain + at least 30s for accounting cleanup.
+shutdownGraceSeconds: 360
+preStopDelaySeconds: 10
+terminationGracePeriodSeconds: 420
 migration:
   enabled: true
   activeDeadlineSeconds: 300

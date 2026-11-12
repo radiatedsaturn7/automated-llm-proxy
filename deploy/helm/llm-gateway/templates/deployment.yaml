@@ -1,3 +1,6 @@
+{{- if lt (int .Values.terminationGracePeriodSeconds) (int (add .Values.preStopDelaySeconds .Values.shutdownGraceSeconds 30)) -}}
+{{- fail "terminationGracePeriodSeconds must include preStopDelaySeconds + shutdownGraceSeconds + at least 30 seconds for accounting cleanup" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,6 +44,12 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
           resources: {{- toYaml .Values.resources | nindent 12 }}
+          {{- if gt (int .Values.preStopDelaySeconds) 0 }}
+          lifecycle:
+            preStop:
+              exec:
+                command: [python, -c, {{ printf "import time; time.sleep(%d)" (int .Values.preStopDelaySeconds) | quote }}]
+          {{- end }}
           startupProbe:
             httpGet: {path: /health/live, port: http}
             periodSeconds: 5

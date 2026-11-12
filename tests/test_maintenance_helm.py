@@ -144,3 +144,27 @@ def test_local_password_defaults_disabled_without_secret_volume():
     env = {x['name']: x['value'] for x in pod['containers'][0]['env']}
     assert env['LOCAL_PASSWORD_ENABLED'] == 'false' and env['LOCAL_MFA_POLICY'] == 'optional'
     assert all(x['name'] != 'installation-secrets' for x in pod['volumes'])
+
+
+def test_shutdown_budget_and_prestop_rendered():
+    deployment = next(doc for doc in render() if doc['kind'] == 'Deployment')
+    pod = deployment['spec']['template']['spec']
+    container = pod['containers'][0]
+    env = {x['name']: x.get('value') for x in container['env']}
+    assert pod['terminationGracePeriodSeconds'] == 420
+    assert env['SHUTDOWN_GRACE_SECONDS'] == '360'
+    assert container['lifecycle']['preStop']['exec']['command'] == ['python', '-c', 'import time; time.sleep(10)']
+    deployment = next(doc for doc in render('preStopDelaySeconds=0', 'shutdownGraceSeconds=5',
+                                          'terminationGracePeriodSeconds=35') if doc['kind'] == 'Deployment')
+    assert 'lifecycle' not in deployment['spec']['template']['spec']['containers'][0]
+
+
+@pytest.mark.parametrize('settings', [
+    ['terminationGracePeriodSeconds=399'],
+    ['preStopDelaySeconds=-1'], ['preStopDelaySeconds=121'],
+    ['shutdownGraceSeconds=0'], ['shutdownGraceSeconds=3601'],
+    ['shutdownGraceSeconds=0.5'], ['terminationGracePeriodSeconds=4001'],
+    ['extraEnv[0].name=SHUTDOWN_GRACE_SECONDS', 'extraEnv[0].value=1'],
+])
+def test_invalid_shutdown_budget_fails_closed(settings):
+    render(*settings, success=False)

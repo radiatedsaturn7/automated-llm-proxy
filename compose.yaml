@@ -34,7 +34,11 @@ services:
   gateway:
     build: .
     image: automated-llm-proxy:local
-    environment: *gateway-environment
+    environment:
+      <<: *gateway-environment
+      SHUTDOWN_GRACE_SECONDS: ${SHUTDOWN_GRACE_SECONDS:-360}
+    # Keep this above the app drain window, allowing time for accounting cleanup.
+    stop_grace_period: ${GATEWAY_STOP_GRACE_PERIOD:-420s}
     ports: ['127.0.0.1:8080:8080']
     read_only: true
     tmpfs: [/tmp]

@@ -2,7 +2,7 @@
 
 ## Current support and limits
 
-Thunderbolt currently accepts **one** `GATEWAY_MASTER_KEY`, a Fernet key. It encrypts
+Brrrtgate currently accepts **one** `GATEWAY_MASTER_KEY`, a Fernet key. It encrypts
 provider credentials and local MFA seeds, including pending enrollment seeds.
 There is no supported keyring, online key rotation, or bulk re-encryption command.
 Changing this setting does not migrate stored ciphertext. Existing credentials and

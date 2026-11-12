@@ -72,7 +72,7 @@ class BodyLimitMiddleware:
         await self.app(scope, replay, send)
 
 
-app = FastAPI(title="Thunderbolt", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Brrrtgate", version="0.1.0", lifespan=lifespan)
 app.add_middleware(BodyLimitMiddleware)
 app.include_router(teams.router)
 app.include_router(comparisons.router)

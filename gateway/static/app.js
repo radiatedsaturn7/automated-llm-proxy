@@ -318,7 +318,7 @@
         if (!result.next_cursor) {
           const blob = new Blob([JSON.stringify({ kind, since: result.since, until: result.until, records }, null, 0)], {type: "application/json"});
           const url = URL.createObjectURL(blob); const link = node("a"); link.href = url;
-          link.download = `thunderbolt-${kind}-${since.toISOString().slice(0, 10)}.json`;
+          link.download = `brrrtgate-${kind}-${since.toISOString().slice(0, 10)}.json`;
           document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
           $("export-progress").textContent = `Downloaded ${records.length} records. Protect this file on your device.`;
           return;

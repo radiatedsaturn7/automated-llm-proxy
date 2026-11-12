@@ -108,6 +108,8 @@ class ProviderHealth(Base):
 
 class APIKey(Base):
     __tablename__ = "api_keys"
+    self_service: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    issuance_operation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True)
     enrollment_request_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True)
     __table_args__ = (Index("ix_api_keys_user_created_id", "user_id", "created_at", "id"),)
     generation: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
@@ -385,3 +387,18 @@ class UserAllowance(Base):
     requests_used: Mapped[int] = mapped_column(Integer, default=0)
     reset_month: Mapped[str | None] = mapped_column(String(7), nullable=True)
     reset_operations: Mapped[list] = mapped_column(JSON, default=list)
+
+
+
+class UserKeyPolicy(Base):
+    __tablename__ = "user_key_policies"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    allowed_models: Mapped[list] = mapped_column(JSON, default=list)
+    permissions: Mapped[list] = mapped_column(JSON, default=lambda: ["inference"])
+    expires_in_days: Mapped[int] = mapped_column(Integer, default=30)
+    rpm: Mapped[int] = mapped_column(Integer, default=60)
+    tpm: Mapped[int] = mapped_column(Integer, default=100000)
+    max_active_keys: Mapped[int] = mapped_column(Integer, default=3)
+    max_total_keys: Mapped[int] = mapped_column(Integer, default=100)

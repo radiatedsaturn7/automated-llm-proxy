@@ -169,6 +169,69 @@
     } catch (error) { if (state.authenticated && generation === state.generation) showError(error); }
     finally { button.disabled = false; }
   }
+  async function keyPolicyAction(userId, button) {
+    const generation = state.generation;
+    const active = () => state.authenticated && state.view === 'users' && generation === state.generation;
+    button.disabled = true; clearError();
+    let dialog;
+    try {
+      const path = `/admin/api/users/${encodeURIComponent(userId)}/key-policy`;
+      const current = await api(path);
+      if (!active()) return;
+      dialog = node('dialog'); const form = node('form');
+      form.append(node('h2', 'Member key issuance policy'));
+      form.append(node('p', 'Disabled by default. Changing this policy revokes existing self-service keys. Dollar budgets and daily allowance remain unchanged.'));
+      const fields = {};
+      const field = (name, label, value, type = 'text', min, max) => {
+        const wrapper = node('label', label); const input = node('input');
+        input.type = type; input.name = name; input.value = value ?? '';
+        if (type === 'checkbox') input.checked = Boolean(value);
+        if (min != null) { input.min = String(min); input.max = String(max); input.step = '1'; input.required = true; }
+        wrapper.append(input); form.append(wrapper); fields[name] = input;
+      };
+      field('enabled', 'Allow member key creation', current.enabled, 'checkbox');
+      field('team_id', 'Team ID (blank for personal)', current.team_id);
+      field('allowed_models', 'Allowed model aliases (comma-separated, matched exactly)', (current.allowed_models || []).join(', '));
+      field('account', 'Also allow account API access', current.permissions?.includes('account'), 'checkbox');
+      field('expires_in_days', 'Expiry in days (1–90)', current.expires_in_days ?? 30, 'number', 1, 90);
+      field('rpm', 'Shared requests per minute', current.rpm ?? 60, 'number', 1, 100000);
+      field('tpm', 'Shared tokens per minute', current.tpm ?? 100000, 'number', 1, 100000000);
+      field('max_active_keys', 'Maximum active self-service keys (1–10)', current.max_active_keys ?? 3, 'number', 1, 10);
+      field('max_total_keys', 'Lifetime creation limit (1–1000)', current.max_total_keys ?? 100, 'number', 1, 1000);
+      const error = node('p'); error.setAttribute('role', 'status'); form.append(error);
+      const save = node('button', 'Save key policy'); save.type = 'submit';
+      const cancel = node('button', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => dialog.close();
+      form.append(save, cancel); dialog.append(form); document.body.append(dialog);
+      const observer = new MutationObserver(() => { if (!active()) dialog.close(); });
+      observer.observe(document.body, {subtree:true, childList:true});
+      const leave = () => dialog.close();
+      window.addEventListener('pagehide', leave);
+      dialog.addEventListener('close', () => { observer.disconnect(); window.removeEventListener('pagehide', leave); dialog.remove(); });
+      form.addEventListener('submit', async event => {
+        event.preventDefault(); if (!active() || save.disabled) return;
+        const models = [...new Set(fields.allowed_models.value.split(',').map(x => x.trim()).filter(Boolean))];
+        if ((fields.enabled.checked && !models.length) || models.length > 100 || models.some(x => x.length > 128 || /[\x00-\x1f]/.test(x))) { error.textContent = 'Enabled policies require 1–100 bounded model names.'; return; }
+        const body = {enabled:fields.enabled.checked, team_id:fields.team_id.value.trim() || null,
+          allowed_models:models, permissions:fields.account.checked ? ['inference','account'] : ['inference']};
+        for (const name of ['expires_in_days','rpm','tpm','max_active_keys','max_total_keys']) {
+          const input = fields[name], value = Number(input.value);
+          if (!Number.isSafeInteger(value) || value < Number(input.min) || value > Number(input.max)) { error.textContent = 'Enter whole numbers within the displayed limits.'; return; }
+          body[name] = value;
+        }
+        if (body.max_active_keys > body.max_total_keys) { error.textContent = 'Active key limit cannot exceed lifetime version limit.'; return; }
+        if (!confirm('Save this member key policy? Material changes revoke ALL existing self-service keys for this member immediately. Clients using them will lose access. Hard spending limits are unchanged.')) return;
+        save.disabled = true;
+        try {
+          await api(path, {method:'PUT', body});
+          if (active() && dialog.isConnected && dialog.open) message('Member key policy saved. Changed policies revoke existing self-service keys.');
+          dialog.close();
+        } catch (_) { if (active() && dialog.isConnected) error.textContent = 'Policy save not confirmed. Check current policy before retrying.'; }
+        finally { save.disabled = false; }
+      });
+      dialog.showModal();
+    } catch (error) { if (active()) showError(error); }
+    finally { button.disabled = false; }
+  }
   function renderTable(data) {
     const container = $("table-wrap"); container.replaceChildren();
     const rows = records(data);
@@ -199,6 +262,8 @@
           toggle.addEventListener("click", () => updateResource(resource, row.id, { enabled: row.enabled === false }, toggle));
           td.append(toggle);
           if (resource === "users") {
+            const issuance = node('button', 'Key issuance'); issuance.type = 'button';
+            issuance.addEventListener('click', () => keyPolicyAction(row.id, issuance)); td.append(issuance);
             const allowance = node('button', 'Usage allowance'); allowance.type = 'button';
             allowance.addEventListener('click', () => allowanceAction(row.id, allowance)); td.append(allowance);
             const sessions = node("button", "Revoke sessions", "danger"); sessions.type = "button";

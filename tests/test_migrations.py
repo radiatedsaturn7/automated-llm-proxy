@@ -325,3 +325,28 @@ async def test_v16_indexes_member_history_without_changing_usage(migration_engin
         assert any(index['name'] == 'ix_usage_user_created_id'
                    and index['column_names'] == ['user_id', 'created_at', 'id'] for index in indexes)
     await migrate()
+
+
+async def test_v17_preserves_existing_credentials_as_admin_origin(migration_engine):
+    from datetime import datetime, timezone
+    from gateway.migrations import REVISIONS, v0016
+    async with migration_engine.begin() as connection:
+        await connection.run_sync(version_metadata.create_all)
+        for number, revision in REVISIONS:
+            if number > 16:
+                break
+            await connection.run_sync(revision.upgrade)
+            await connection.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
+        await connection.execute(v0016.metadata.tables['users'].insert().values(
+            id='original-user', email='original@example.test', role='member', enabled=True, scim_managed=False))
+        await connection.execute(v0016.metadata.tables['api_keys'].insert().values(
+            id='original', user_id='original-user', name='original', digest='digest', prefix='prefix',
+            kind='api', permissions=['inference'], allowed_models=['chat'], rpm=10,tpm=100,
+            generation=0,expires_at=datetime.now(timezone.utc),revoked=False,created_at=datetime.now(timezone.utc)))
+    await migrate()
+    async with migration_engine.connect() as connection:
+        row = (await connection.execute(select(db.APIKey.__table__))).mappings().one()
+        assert row['self_service'] is False and row['issuance_operation_id'] is None
+        assert row['digest']=='digest' and row['rpm']==10
+        assert not (await connection.execute(select(db.UserKeyPolicy.__table__))).all()
+    await migrate()

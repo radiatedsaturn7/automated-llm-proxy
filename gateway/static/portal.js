@@ -10,6 +10,12 @@ let allowanceGeneration = 0;
 let usageGeneration = 0;
 let usageCursor = null;
 let usageBusy = false;
+let keyPolicy = null;
+let keyPolicyGeneration = 0;
+let keyOperation = null;
+let inaccessibleKey = null;
+let keyIssuanceBusy = false;
+let keyIssuanceEpoch = 0;
 const message = document.getElementById('message');
 const el = id => document.getElementById(id);
 function clearSecret() { clearTimeout(secretTimer); el('secret').value = ''; }
@@ -17,7 +23,7 @@ function clearPasswords() { el('password-form').reset(); }
 function clearLocal() {
   signedOut = true; ++generation; csrf = '';
   ++allowanceGeneration; allowance = null; resetOperation = null; el('allowance-panel').hidden = true; el('allowance-summary').textContent = ''; el('allowance-message').textContent = '';
-  clearUsage();
+  clearUsage(); clearKeyIssuance();
   clearPasswords(); el('security').hidden = true;
   clearSecret(); el('secret-dialog').close(); el('profile').textContent = ''; el('keys').replaceChildren();
 }
@@ -38,7 +44,7 @@ async function load() {
     el('password-form').hidden = !profile.can_change_password;
     el('password-mfa').hidden = !profile.local_mfa_enrolled;
     el('password-code').required = Boolean(profile.local_mfa_enrolled);
-    if (csrf) { loadAllowance(); loadUsage(); }
+    if (csrf) { loadAllowance(); loadUsage(); loadKeyPolicy(); }
     const visible = {...profile}; delete visible.csrf_token;
     el('profile').textContent = JSON.stringify(visible, null, 2);
     const keys = await api('/account/api/keys');
@@ -72,7 +78,7 @@ async function load() {
   } catch (error) {
     if (!signedOut && version === generation) {
       ++allowanceGeneration; allowance = null; el('allowance-panel').hidden = true;
-      clearUsage();
+      clearUsage(); clearKeyIssuance();
       clearPasswords(); el('security').hidden = true;
       csrf = ''; el('profile').textContent = ''; el('keys').replaceChildren(); clearSecret(); el('secret-dialog').close();
       message.textContent = error.message;
@@ -220,5 +226,80 @@ async function loadUsage(next = false) {
 }
 el('refresh-usage').addEventListener('click', () => loadUsage());
 el('more-usage').addEventListener('click', () => loadUsage(true));
+
+function clearKeyIssuance() {
+  ++keyIssuanceEpoch; ++keyPolicyGeneration; keyPolicy = null; keyOperation = null; inaccessibleKey = null;
+  el('key-issuance').hidden = true; el('create-key-form').reset();
+  el('key-policy-summary').textContent = ''; el('key-issuance-message').textContent = '';
+  el('recover-key').hidden = true;
+}
+function renderKeyPolicy() {
+  el('key-issuance').hidden = !keyPolicy?.enabled && !keyOperation && !inaccessibleKey;
+  el('key-name').disabled = keyIssuanceBusy || Boolean(keyOperation) || Boolean(inaccessibleKey);
+  el('create-key').textContent = keyOperation ? 'Retry pending key creation' : 'Create API key';
+  el('create-key').disabled = keyIssuanceBusy || Boolean(inaccessibleKey) || (!keyOperation && (!keyPolicy?.enabled || keyPolicy.can_create === false));
+  el('recover-key').hidden = !inaccessibleKey;
+  el('recover-key').disabled = keyIssuanceBusy;
+  if (keyPolicy?.enabled && keyPolicy.can_create === false && !keyOperation && !inaccessibleKey) el('key-issuance-message').textContent = keyPolicy.disabled_reason || 'Key creation is currently unavailable under your policy.';
+  if (keyPolicy?.enabled) el('key-policy-summary').textContent = `Models: ${keyPolicy.allowed_models.join(', ')}. Permissions: ${keyPolicy.permissions.join(', ')}. Expires after ${keyPolicy.expires_in_days} days. ${keyPolicy.active_keys ?? 0} of ${keyPolicy.max_active_keys} active self-service keys; ${keyPolicy.total_keys ?? 0} of ${keyPolicy.max_total_keys} lifetime creations. Shared minute limits: ${keyPolicy.rpm} requests / ${keyPolicy.tpm} tokens.`;
+}
+async function loadKeyPolicy() {
+  if (signedOut || !csrf || keyIssuanceBusy) return;
+  const version = ++keyPolicyGeneration;
+  try {
+    const result = await api('/account/api/key-policy');
+    if (signedOut || version !== keyPolicyGeneration) return;
+    keyPolicy = result; renderKeyPolicy();
+  } catch (_) {
+    if (!signedOut && version === keyPolicyGeneration) {
+      keyPolicy = null; renderKeyPolicy();
+    }
+  }
+}
+el('create-key-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (signedOut || !csrf || keyIssuanceBusy || inaccessibleKey) return;
+  if (!keyOperation) {
+    const name = el('key-name').value.trim();
+    if (!keyPolicy?.enabled || keyPolicy.can_create === false || !name || name.length > 100) return;
+    if (!confirm('Create an API key with the displayed administrator-approved permissions and expiry? Spending and usage limits remain unchanged.')) return;
+    keyOperation = {operation_id:crypto.randomUUID(), name};
+  }
+  const epoch = keyIssuanceEpoch;
+  keyIssuanceBusy = true; ++keyPolicyGeneration; renderKeyPolicy();
+  try {
+    const result = await api('/account/api/keys', 'POST', keyOperation);
+    if (signedOut || epoch !== keyIssuanceEpoch) return;
+    if (!result.credential?.id) throw new Error('Missing key receipt');
+    keyOperation = null;
+    if (result.key) {
+      clearSecret(); el('secret').value = result.key; el('secret-dialog').showModal();
+      secretTimer = setTimeout(() => { clearSecret(); el('secret-dialog').close(); }, 120000);
+      el('key-name').value = '';
+      el('key-issuance-message').textContent = 'Key created. Copy it now; it will not be shown again.';
+    } else {
+      inaccessibleKey = result.credential.id;
+      el('key-issuance-message').textContent = 'Earlier creation confirmed, but its secret cannot be recovered. Revoke the inaccessible key before creating a replacement.';
+    }
+    await load();
+  } catch (_) {
+    if (!signedOut && epoch === keyIssuanceEpoch) el('key-issuance-message').textContent = 'Creation not confirmed. Retry the same pending operation. Do not create another key in a different tab. If access or policy changed, ask an administrator to check your keys.';
+  } finally { keyIssuanceBusy = false; if (!signedOut && epoch === keyIssuanceEpoch) { renderKeyPolicy(); loadKeyPolicy(); } }
+});
+el('recover-key').addEventListener('click', async () => {
+  if (signedOut || !csrf || keyIssuanceBusy || !inaccessibleKey) return;
+  if (!confirm('Revoke the key whose secret was lost? Any clients using that key will lose access. You can then create a replacement.')) return;
+  const epoch = keyIssuanceEpoch;
+  keyIssuanceBusy = true; renderKeyPolicy();
+  try {
+    await api(`/account/api/keys/${encodeURIComponent(inaccessibleKey)}/revoke`, 'POST');
+    if (signedOut || epoch !== keyIssuanceEpoch) return;
+    inaccessibleKey = null; el('key-name').value = '';
+    el('key-issuance-message').textContent = 'Inaccessible key revoked. You may create a replacement.';
+    await load();
+  } catch (_) {
+    if (!signedOut && epoch === keyIssuanceEpoch) el('key-issuance-message').textContent = 'Revocation not confirmed. Retry revocation before creating a replacement.';
+  } finally { keyIssuanceBusy = false; if (!signedOut && epoch === keyIssuanceEpoch) { renderKeyPolicy(); loadKeyPolicy(); } }
+});
 window.addEventListener('pagehide', clearLocal);
 load();

@@ -70,6 +70,6 @@ async def test_session_selfservice_csrf_ownership_and_no_create(client, admin_he
         await client.post("/account/api/keys/" + keys[0]["id"] + "/revoke", headers=headers)
     ).status_code == 200
     assert (
-        await client.post("/account/api/keys", headers=headers, json={"name": "unlimited"})
-    ).status_code == 405
+        await client.post("/account/api/keys", headers=headers, json={"name": "unlimited", "operation_id": "d58c5eb1-0545-4c32-9f8e-00865a6466ee"})
+    ).status_code == 409
     assert (await client.get("/portal")).status_code == 200

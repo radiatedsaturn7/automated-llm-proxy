@@ -31,7 +31,7 @@ Later database/operations and evaluation-runner increments add composite query i
 
 The ninth increment merged as `0ed13cb`. CI run `43069786191` at head `2f7b8fa` passed all four jobs, including real PostgreSQL, fifteen Chromium cases and twelve Helm tests. This adds explicit multi-team delegation, native Gemini text operations, and opt-in reviewed inbound DLP heuristics. It does not establish full provider API parity or comprehensive sensitive-data detection.
 
-## Latest exact-head acceptance (PR #16)
+## Historical exact-head acceptance (PR #16)
 
 [CI run 43125212538](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43125212538)
 passed all five jobs at exact head
@@ -56,6 +56,20 @@ services, all SDK features, production capacity or deployment security.
 `7af1ab65c351cf658ff24226a4339dc4087b512c`.** PR #15 merged as
 `e3b514392c2a798229af2c02889f89a71ad485ee`. Green checks do not imply release
 approval, and later round-17 changes are not covered by this run.
+
+## Latest completed acceptance (PR #23)
+
+[CI run 43139261994](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43139261994)
+passed all five jobs for branch head `11c7ebb44ece3fc36bdf7846865aba509049415e`:
+Python/lint/dependency audit, PostgreSQL plus restore acceptance, container browser
+and two-replica tests, real disposable Keycloak, and deployment checks. PR #23
+merged as `eca69ce8f0e7724835526c4b898af0669a1709c0`.
+This adds historical SCIM group deletion/recreation and optional offline audit
+snapshot authentication. Neither simulated providers nor CI establish production
+readiness for an untested customer installation. See [release gates](security-readiness.md).
+
+Subsequent CI dependency alignment is described in [dependency verification](dependencies.md);
+this historical run does not cover later commits.
 
 ## Research informing priorities
 

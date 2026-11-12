@@ -9,6 +9,8 @@ concurrency:
   cancel-in-progress: true
 permissions:
   contents: read
+env:
+  UV_VERSION: '0.13.6'
 jobs:
   python:
     runs-on: ubuntu-latest
@@ -17,11 +19,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - run: python -m pip install -e '.[dev,sdk-test]' pip-audit
-      - run: python -m ruff check .
-      - run: python -m pytest -q
+      - run: python -m pip install "uv==$UV_VERSION"
+      - name: Install locked test and runtime dependencies
+        run: uv sync --locked --extra dev --extra sdk-test
+      - name: Reject stale container runtime requirements
+        shell: bash
+        run: |
+          uv export --locked --no-dev --no-emit-project --format requirements-txt --no-header > "$RUNNER_TEMP/requirements.lock"
+          diff -u requirements.lock "$RUNNER_TEMP/requirements.lock"
+      - run: uv run --no-sync python -m ruff check .
+      - run: uv run --no-sync python -m pytest -q
         timeout-minutes: 10
-      - run: python -m pip_audit
+      - run: uv run --no-sync python -m pip_audit
+      - name: Record tested dependency inventory
+        run: |
+          mkdir -p dependency-evidence
+          cp pyproject.toml uv.lock requirements.lock dependency-evidence/
+          uv run --no-sync python -m pip list --format=json > dependency-evidence/installed.json
+          printf '%s\n' "$GITHUB_SHA" > dependency-evidence/tested-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dependency-evidence-${{ github.sha }}
+          path: dependency-evidence/
+          retention-days: 14
+          if-no-files-found: error
   deployments:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -29,8 +50,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4.3.0
         with: {version: v3.17.3}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m pip install "uv==$UV_VERSION"
+      - run: uv sync --locked --extra dev --extra sdk-test
       - name: Validate maintenance chart rendering
-        run: python -m pip install pytest pyyaml && python -m pytest --noconftest -q tests/test_maintenance_helm.py
+        run: uv run --no-sync python -m pytest --noconftest -q tests/test_maintenance_helm.py
       - run: helm lint deploy/helm/llm-gateway --set existingSecret=test-secret
       - run: helm template test deploy/helm/llm-gateway --set existingSecret=test-secret > /tmp/rendered.yaml
       - run: helm template test deploy/helm/llm-gateway -f deploy/helm/llm-gateway/values-ha.yaml --set existingSecret=test-secret --set networkPolicy.enabled=true > /tmp/rendered-ha.yaml
@@ -66,13 +91,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -e '.[dev,sdk-test]'
-      - run: pytest -q
+      - run: python -m pip install "uv==$UV_VERSION"
+      - run: uv sync --locked --extra dev --extra sdk-test
+      - run: uv run --no-sync python -m pytest -q
         timeout-minutes: 10
       - name: Disposable PostgreSQL backup and restore acceptance
         env:
           DISPOSABLE_RESTORE_DRILL: '1'
-        run: python tests/ops/restore_drill.py
+        run: uv run --no-sync python tests/ops/restore_drill.py
         timeout-minutes: 10
 
   compose-browser:

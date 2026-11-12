@@ -31,14 +31,14 @@ Also implemented: shared per-model provider circuit breakers, opt-in SSO-assiste
 Python 3.12+, [uv](https://docs.astral.sh/uv/), and no provider account are needed to run the UI and tests.
 
 ```sh
-uv sync --frozen --extra dev
-export GATEWAY_MASTER_KEY="$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
-export GATEWAY_SIGNING_KEY="$(uv run python -c 'import secrets; print(secrets.token_urlsafe(48))')"
-export BOOTSTRAP_TOKEN="$(uv run python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+uv sync --locked --extra dev --extra sdk-test
+export GATEWAY_MASTER_KEY="$(uv run --no-sync python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+export GATEWAY_SIGNING_KEY="$(uv run --no-sync python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+export BOOTSTRAP_TOKEN="$(uv run --no-sync python -c 'import secrets; print(secrets.token_urlsafe(48))')"
 export DATABASE_URL='sqlite+aiosqlite:///./gateway.db'
 export PUBLIC_URL='http://localhost:8080'
-uv run python -m gateway.migrate
-uv run python -m gateway.cli --host 127.0.0.1 --port 8080
+uv run --no-sync python -m gateway.migrate
+uv run --no-sync python -m gateway.cli --host 127.0.0.1 --port 8080
 ```
 
 Open http://localhost:8080/admin. Use the bootstrap token once to create the first administrator and receive a seven-day admin key. Store that key securely; do not use the bootstrap secret as an API credential. Keep encryption/signing keys stable across restarts and replicas. Create a team/user, configure a provider with a model alias and per-million token USD prices, then create a restricted user key. Provider calls incur your provider's charges.
@@ -46,8 +46,8 @@ Open http://localhost:8080/admin. Use the bootstrap token once to create the fir
 API documentation: `/docs`. Inference uses `Authorization: Bearer <user-api-key>` and `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`, and the documented text-only `/v1/responses` subset. Never distribute provider keys to end users. A provider base URL includes its API prefix, e.g. `https://api.openai.com/v1` or `https://api.anthropic.com/v1`.
 
 ```sh
-uv run pytest -q
-uv run ruff check .
+uv run --no-sync pytest -q
+uv run --no-sync ruff check .
 ```
 
 ## Deployment and guides

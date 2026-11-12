@@ -143,3 +143,20 @@ body read, including streams; no decompressor is allowed to expand a response ah
 of the body-size check. Providers/reverse proxies that force compression must be
 configured to honor identity encoding. Error-status response bodies are never read.
 Tests use synthetic upstream responses, not paid/live provider calls.
+
+### Configuration fencing at admission
+
+Selecting a provider does not yet authorize dispatch. Budget admission rechecks
+that provider under the same shared policy gate used for user/key authorization.
+Disable, key, base URL, provider kind, priority, selected model or selected-route
+pricing changes between selection and admission reject the request with 409,
+before reserving funds, spending rate allowance or contacting the provider.
+There is no automatic reroute/retry. Aborted half-open health probes are released.
+Changes only to unrelated aliases do not invalidate the selected route.
+
+The admission transaction is the boundary: requests already admitted may finish
+using their captured provider configuration and prices, even if an operator
+changes or disables the provider immediately afterward. This does not forcibly
+cancel dispatched work, roll back provider billing or guarantee credential
+revocation at an external provider. All configuration writers must use the
+control-plane policy gate; out-of-band SQL that ignores it is unsupported.

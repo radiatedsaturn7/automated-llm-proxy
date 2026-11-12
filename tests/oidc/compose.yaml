@@ -1,0 +1,64 @@
+# Isolated CI fixture; never combine this realm/proxy with a real deployment.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_DB: gateway
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U gateway -d gateway]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  migrate:
+    image: automated-llm-proxy:oidc-ci
+    build:
+      context: ../..
+      dockerfile: tests/oidc/Dockerfile.gateway
+    command: [python, -m, gateway.migrate]
+    environment: &gateway-env
+      DATABASE_URL: ${DATABASE_URL:?}
+      GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?}
+      GATEWAY_SIGNING_KEY: ${GATEWAY_SIGNING_KEY:?}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:?}
+      METRICS_TOKEN: ${METRICS_TOKEN:?}
+      ENVIRONMENT: production
+      PUBLIC_URL: https://gateway.test
+      OIDC_ISSUER: https://idp.test/realms/gateway-ci
+      OIDC_CLIENT_ID: gateway
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?}
+      OIDC_GROUP_MAPPING: '{"gateway-admins":{"role":"admin"}}'
+    depends_on:
+      postgres: {condition: service_healthy}
+  gateway:
+    image: automated-llm-proxy:oidc-ci
+    environment: *gateway-env
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.0
+    command: [start-dev, --import-realm]
+    environment:
+      KC_HOSTNAME: https://idp.test
+      KC_HTTP_ENABLED: 'true'
+      KC_PROXY_HEADERS: xforwarded
+      KC_TRUSTSTORE_PATHS: /tls/tls.crt
+    volumes:
+      - ./generated/realm.json:/opt/keycloak/data/import/gateway-ci.json:ro
+      - ./generated/tls.crt:/tls/tls.crt:ro
+  proxy:
+    image: nginx:1.27.4-alpine
+    ports: ['127.0.0.1:443:443']
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./generated/tls.crt:/tls/tls.crt:ro
+      - ./generated/tls.key:/tls/tls.key:ro
+    networks:
+      default:
+        aliases: [idp.test, gateway.test]
+    depends_on: [gateway, keycloak]

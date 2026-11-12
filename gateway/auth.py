@@ -21,6 +21,7 @@ from .config import get_settings
 from .security import aware, digest, identify
 
 router = APIRouter()
+OIDC_HTTP_DEADLINE_SECONDS = 15
 
 
 @router.post("/auth/agent/exchange")
@@ -108,24 +109,38 @@ def validate_oidc_url(value):
 async def oidc_json(url, *, form=None):
     validate_oidc_url(url)
     try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
-            async with client.stream("POST" if form is not None else "GET", url, data=form) as response:
-                if response.status_code != 200:
-                    raise HTTPException(503, "OIDC endpoint unavailable")
-                chunks = bytearray()
-                async for chunk in response.aiter_bytes():
-                    chunks.extend(chunk)
-                    if len(chunks) > 262144:
-                        raise HTTPException(503, "OIDC response too large")
-                value = json.loads(chunks)
-                if not isinstance(value, dict):
-                    raise ValueError("Expected JSON object")
-                return value
-    except (httpx.HTTPError, ValueError) as exc:
+        async with asyncio.timeout(OIDC_HTTP_DEADLINE_SECONDS):
+            async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False,
+                                         headers={"Accept-Encoding": "identity"}) as client:
+                async with client.stream("POST" if form is not None else "GET", url, data=form) as response:
+                    if response.status_code != 200:
+                        raise HTTPException(503, "OIDC endpoint unavailable")
+                    if response.headers.get("content-encoding", "identity").strip().lower() != "identity":
+                        raise HTTPException(503, "Compressed OIDC responses are unsupported")
+                    chunks = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        chunks.extend(chunk)
+                        if len(chunks) > 262144:
+                            raise HTTPException(503, "OIDC response too large")
+                    value = json.loads(chunks)
+                    if not isinstance(value, dict):
+                        raise ValueError("Expected JSON object")
+                    return value
+    except (httpx.HTTPError, ValueError, TimeoutError) as exc:
         raise HTTPException(503, "OIDC endpoint unavailable") from exc
 
 
 async def cached_oidc_json(url, *, kind, force=False):
+    # Bound single-flight lock wait as well as the network operation. An offline
+    # IdP must not create a serial queue of indefinitely waiting login requests.
+    try:
+        async with asyncio.timeout(OIDC_HTTP_DEADLINE_SECONDS):
+            return await _cached_oidc_json(url, kind=kind, force=force)
+    except TimeoutError:
+        raise HTTPException(503, "OIDC metadata temporarily unavailable") from None
+
+
+async def _cached_oidc_json(url, *, kind, force=False):
     cfg = get_settings()
     cache_key = (cfg.oidc_issuer, cfg.oidc_trusted_endpoint_origins, cfg.oidc_cache_seconds, kind, url)
     async with _oidc_cache_lock:

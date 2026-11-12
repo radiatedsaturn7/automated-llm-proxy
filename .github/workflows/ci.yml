@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - run: python -m pip install -e '.[dev]' pip-audit
+      - run: python -m pip install -e '.[dev,sdk-test]' pip-audit
       - run: python -m ruff check .
       - run: python -m pytest -q
       - run: python -m pip_audit
@@ -62,7 +62,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -e '.[dev]'
+      - run: python -m pip install -e '.[dev,sdk-test]'
       - run: pytest -q
       - name: Disposable PostgreSQL backup and restore acceptance
         env:
@@ -144,3 +144,59 @@ jobs:
             COMPOSE_FILE=compose.yaml:tests/browser/compose.mock.yaml:tests/ops/compose.replicas.yaml COMPOSE_PROJECT_NAME=thunderbolt-replica-drill docker compose down --volumes --remove-orphans || true
           fi
           rm -f .env tests/browser/mock-provider/tls/server.key tests/browser/mock-provider/tls/server.crt
+
+  real-oidc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      COMPOSE_PROJECT_NAME: thunderbolt-oidc-ci
+      NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/tests/oidc/generated/tls.crt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tests/browser/package-lock.json
+      - run: npm ci --prefix tests/browser
+      - run: npx playwright install chromium
+        working-directory: tests/browser
+        timeout-minutes: 5
+      - name: Generate isolated realm, credentials and TLS trust
+        run: |
+          python tests/oidc/generate.py
+          echo '127.0.0.1 idp.test gateway.test' | sudo tee -a /etc/hosts >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libnss3-tools
+          mkdir -p "$HOME/.pki/nssdb"
+          certutil -N --empty-password -d "sql:$HOME/.pki/nssdb"
+          certutil -A -d "sql:$HOME/.pki/nssdb" -n thunderbolt-ci-only -t 'C,,' -i tests/oidc/generated/tls.crt
+      - name: Build gateway and start official Keycloak fixture
+        run: |
+          docker build -t automated-llm-proxy:local .
+          docker compose --env-file tests/oidc/generated/fixture.env -f tests/oidc/compose.yaml up --build -d
+      - name: Wait for verified TLS discovery and gateway readiness
+        timeout-minutes: 4
+        shell: bash
+        run: |
+          for attempt in $(seq 1 90); do
+            if curl --noproxy '*' --silent --fail --cacert tests/oidc/generated/tls.crt https://idp.test/realms/gateway-ci/.well-known/openid-configuration >/dev/null && \
+               curl --noproxy '*' --silent --fail --cacert tests/oidc/generated/tls.crt https://gateway.test/health/ready >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo 'Disposable OIDC fixture did not become ready'; exit 1
+      - name: Exercise real PKCE, groups, CSRF and signed logout
+        run: node tests/browser/node_modules/@playwright/test/cli.js test --config tests/oidc/playwright.config.mjs
+      - name: Show fixture status on failure
+        if: failure()
+        run: |
+          if [ -f tests/oidc/generated/fixture.env ]; then
+            docker compose --env-file tests/oidc/generated/fixture.env -f tests/oidc/compose.yaml ps -a
+          fi
+      - name: Remove disposable identity stack and secrets
+        if: always()
+        run: |
+          if [ -f tests/oidc/generated/fixture.env ]; then
+            docker compose --env-file tests/oidc/generated/fixture.env -f tests/oidc/compose.yaml down --volumes --remove-orphans || true
+          fi
+          rm -rf tests/oidc/generated

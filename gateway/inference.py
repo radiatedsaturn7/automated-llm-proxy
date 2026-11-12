@@ -213,12 +213,14 @@ async def infer(request, endpoint):
     # Choose one healthy route before reservation/dispatch. Never retry this request.
     provider, health_ticket = await provider_health.choose(model, endpoint)
     route = provider.models[model]
+    selected_provider = policy.provider_snapshot(provider, model)
     try:
         url, headers, body = upstream_request(provider, route, payload, endpoint)
         input_bound = policy.token_bound(payload)
         output_bound = payload.get("max_tokens", payload.get("max_completion_tokens", 0))
         amount = policy.price(input_bound * 2, output_bound * 2, route)
-        reservation_id = await policy.reserve(identity, amount, input_bound + output_bound, model)
+        reservation_id = await policy.reserve(identity, amount, input_bound + output_bound, model,
+                                              selected_provider=selected_provider)
     except BaseException:
         await provider_health.abandon(health_ticket)
         raise

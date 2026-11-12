@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING
 
 from fastapi import HTTPException
@@ -20,8 +21,34 @@ def token_bound(payload):
     return len(json.dumps(clean, ensure_ascii=False).encode("utf-8")) + 256
 
 
-async def reserve(identity, amount, tokens, model):
+@dataclass(frozen=True, repr=False)
+class ProviderSnapshot:
+    provider_id: str
+    enabled: bool
+    kind: str
+    base_url: str
+    encrypted_key: str
+    priority: int
+    route_json: str
+
+
+def provider_snapshot(provider, model):
+    # Capture no plaintext secret. Suppress repr so ciphertext/configuration
+    # cannot accidentally enter diagnostics through a dataclass representation.
+    return ProviderSnapshot(provider.id, provider.enabled, provider.kind, provider.base_url,
+                            provider.encrypted_key, provider.priority,
+                            json.dumps(provider.models.get(model), sort_keys=True, separators=(",", ":")))
+
+
+async def reserve(identity, amount, tokens, model, *, selected_provider=None):
     async with db.transaction(inference=True) as s:
+        # Admin configuration writes hold the exclusive policy gate. Compare
+        # inside admission's shared gate before any accounting/rate mutation.
+        if selected_provider is not None:
+            provider = await s.get(db.Provider, selected_provider.provider_id)
+            if (not provider or not provider.enabled or model not in provider.models
+                    or provider_snapshot(provider, model) != selected_provider):
+                raise HTTPException(409, "Selected provider configuration changed before admission")
         key = await s.get(db.APIKey, identity.key.id)
         if key is None:
             raise HTTPException(401, "Credential changed")

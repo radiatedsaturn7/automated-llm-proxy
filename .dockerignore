@@ -23,3 +23,7 @@ dist
 node_modules
 test-results
 playwright-report
+# Never copy disposable identity credentials/realm into image build layers.
+# The public test CA is the sole input required by the isolated OIDC test image.
+tests/oidc/generated/*
+!tests/oidc/generated/tls.crt

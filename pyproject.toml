@@ -16,6 +16,7 @@ dependencies = [
 ]
 [project.optional-dependencies]
 dev = ["pytest>=9.0.3,<10", "pytest-asyncio>=1.0,<2", "ruff>=0.9,<1", "pip-audit>=2.7,<3"]
+sdk-test = ["openai==3.49.0"]
 [project.scripts]
 llm-gateway = "gateway.cli:main"
 [tool.hatch.build.targets.wheel]

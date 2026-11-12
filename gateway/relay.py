@@ -287,7 +287,8 @@ def create_relay_app(settings: RelaySettings | None = None, client: httpx.AsyncC
                     token = await broker.token(rejected_token=token)
                     continue
                 break
-            assert upstream is not None
+            if upstream is None or close is None:
+                raise HTTPException(502, "Central gateway unavailable")
             if upstream.status_code == 401:
                 await close()
                 raise HTTPException(503, "Central gateway rejected relay credentials")

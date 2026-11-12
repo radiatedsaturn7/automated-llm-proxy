@@ -26,7 +26,7 @@ def shutdown_grace(value):
 
 def main():
     parser = argparse.ArgumentParser(description='Brrrtgate gateway')
-    parser.add_argument('--host', default='0.0.0.0')
+    parser.add_argument('--host', default='0.0.0.0')  # nosec B104 # Container service; restrict ingress/TLS at deployment boundary.
     parser.add_argument('--port', type=int, default=8080)
     parser.add_argument('--shutdown-grace-seconds', type=shutdown_grace,
                         default=os.environ.get('SHUTDOWN_GRACE_SECONDS', '360'),

@@ -56,6 +56,7 @@ uv run ruff check .
 - [Member self-service](docs/self-service.md)
 - [Credential permissions and least-privilege integrations](docs/credential-permissions.md)
 - [Audit/usage export and signed pagination](docs/audit-export.md)
+- [Resumable metadata-only audit collector](docs/audit-collector.md)
 - [Provider health and shared circuit breakers](docs/provider-health.md)
 - [Admission concurrency and lock semantics](docs/policy-concurrency.md)
 - [Observability and monitoring](docs/observability.md)

@@ -82,7 +82,8 @@ Register `PUBLIC_URL/auth/oidc/backchannel-logout` with the configured identity 
 It accepts one URL-encoded `logout_token`, signed by the same trusted RS256/ES256 JWKS
 used for login. Issuer, audience, event, identifiers and issuance time are checked;
 nonce-bearing tokens are rejected. A subject or session ID is required. When both
-are supplied both must match. Local sessions and independent API/agent credentials
+are supplied both must match. Matching OIDC browser sessions are revoked.
+Local-password browser sessions and independent API/agent credentials
 are not revoked by this endpoint; disable users/revoke credentials separately for
 full offboarding. No remote provider or vendor interoperability certification is implied.
 

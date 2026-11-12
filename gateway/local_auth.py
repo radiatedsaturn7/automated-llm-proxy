@@ -16,6 +16,7 @@ from .security import Identity, admin, aware, digest, revalidate_admin
 
 router = APIRouter()
 _hash_slots = asyncio.Semaphore(2)
+_hash_jobs = set()
 
 
 async def derive(function, *args):
@@ -24,15 +25,25 @@ async def derive(function, *args):
         await asyncio.wait_for(_hash_slots.acquire(), timeout=0.01)
     except TimeoutError:
         raise HTTPException(503, "Login temporarily unavailable")
+    slots = _hash_slots
     try:
-        task = asyncio.create_task(asyncio.to_thread(function, *args))
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            await task
-            raise
-    finally:
-        _hash_slots.release()
+        # A directly retained executor future is never canceled with the caller.
+        # Repeated task cancellation must not free capacity while scrypt still runs.
+        job = asyncio.get_running_loop().run_in_executor(None, function, *args)
+    except BaseException:
+        slots.release()
+        raise
+    _hash_jobs.add(job)
+
+    def completed(done):
+        _hash_jobs.discard(done)
+        slots.release()
+        # Retrieve detached failures without logging passwords or hash inputs.
+        if not done.cancelled():
+            done.exception()
+
+    job.add_done_callback(completed)
+    return await asyncio.shield(job)
 
 
 class PasswordBody(BaseModel):

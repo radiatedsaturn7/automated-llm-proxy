@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     gateway_master_key: str
     gateway_signing_key: str = Field(min_length=32)
     bootstrap_token: str = Field(min_length=32)
-    environment: str = "development"
+    environment: Literal["development", "production"] = "development"
     public_url: str = "http://localhost:8080"
     local_password_enabled: bool = False
     local_session_seconds: int = Field(default=3600, ge=300, le=28800)
@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_secrets(self):
         Fernet(self.gateway_master_key.encode())
+        public = urlparse(self.public_url)
+        if (public.scheme not in {"http", "https"} or not public.hostname or public.username
+                or public.password or public.query or public.fragment):
+            raise ValueError("PUBLIC_URL requires an HTTP(S) URL without credentials, query or fragment")
         models = json.loads(self.enrollment_allowed_models)
         if (not isinstance(models, list) or len(models) > 100
                 or any(not isinstance(m, str) or not m or len(m) > 128 for m in models)

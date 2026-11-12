@@ -1,0 +1,6 @@
+# Disposable trust fixture only; production image remains unmodified.
+FROM automated-llm-proxy:local
+USER root
+COPY tests/oidc/generated/tls.crt /tmp/oidc-test-ca.crt
+RUN cat /tmp/oidc-test-ca.crt >> "$(python -c 'import certifi; print(certifi.where())')" && rm /tmp/oidc-test-ca.crt
+USER 10001:10001

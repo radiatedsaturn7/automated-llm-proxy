@@ -112,3 +112,10 @@ This is transaction ordering, not retroactive cancellation: a mutation committed
 revocation remains committed. Inference already admitted/dispatched may still complete
 and be billed. Audit records remain metadata-only. Use separate key/session revocation
 and local disablement as appropriate for incident containment.
+
+OIDC discovery, signing-key and token HTTP responses request identity encoding and
+reject compressed bodies before decoding. Each HTTP operation has a 15-second
+absolute deadline in addition to its per-read timeout and 256 KiB body bound.
+Metadata single-flight lock waits also have a 15-second deadline, so an unavailable
+identity provider cannot serialize an indefinitely growing login queue. These
+failures return 503 and do not fall back to expired cached signing metadata.

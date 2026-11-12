@@ -61,6 +61,8 @@ uv run ruff check .
 - [Admission concurrency and lock semantics](docs/policy-concurrency.md)
 - [Observability and monitoring](docs/observability.md)
 - [Provider compatibility](docs/providers.md)
+- [Official Python SDK acceptance](docs/sdk-compatibility.md)
+- [Internal security and operational readiness](docs/security-readiness.md)
 - [SCIM provisioning subset](docs/provisioning.md)
 - [Optional local password fallback](docs/local-passwords.md)
 - [Multi-team delegation and team administration](docs/team-delegation.md)

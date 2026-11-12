@@ -74,3 +74,50 @@ async def test_endpoint_redirect_size_and_json_fail_closed(cache_config, monkeyp
         with pytest.raises(HTTPException) as exc:
             await auth.oidc_json('https://id.example/keys')
         assert exc.value.status_code == 503
+
+
+async def test_compressed_metadata_rejected_before_read(cache_config, monkeypatch):
+    class Unread(httpx.AsyncByteStream):
+        reads = 0
+        async def __aiter__(self):
+            self.reads += 1
+            yield b'not even a gzip stream'
+    stream = Unread()
+    original = httpx.AsyncClient
+    def respond(request):
+        assert request.headers['accept-encoding'] == 'identity'
+        return httpx.Response(200, headers={'content-encoding': 'gzip'}, stream=stream)
+    monkeypatch.setattr(auth.httpx, 'AsyncClient', lambda **kwargs: original(
+        **{**kwargs, 'transport': httpx.MockTransport(respond)}))
+    with pytest.raises(HTTPException) as exc:
+        await auth.oidc_json('https://id.example/keys')
+    assert exc.value.status_code == 503
+    assert stream.reads == 0
+
+
+async def test_trickling_metadata_has_absolute_deadline(cache_config, monkeypatch):
+    class Trickle(httpx.AsyncByteStream):
+        closed = False
+        async def __aiter__(self):
+            while True:
+                await asyncio.sleep(.005)
+                yield b' '
+        async def aclose(self):
+            self.closed = True
+    stream = Trickle()
+    original = httpx.AsyncClient
+    monkeypatch.setattr(auth, 'OIDC_HTTP_DEADLINE_SECONDS', .025)
+    monkeypatch.setattr(auth.httpx, 'AsyncClient', lambda **kwargs: original(
+        **{**kwargs, 'transport': httpx.MockTransport(lambda r: httpx.Response(200, stream=stream))}))
+    with pytest.raises(HTTPException) as exc:
+        await asyncio.wait_for(auth.oidc_json('https://id.example/keys'), timeout=.5)
+    assert exc.value.status_code == 503
+    assert stream.closed
+
+
+async def test_metadata_lock_wait_is_bounded(cache_config, monkeypatch):
+    monkeypatch.setattr(auth, 'OIDC_HTTP_DEADLINE_SECONDS', .025)
+    async with auth._oidc_cache_lock:
+        with pytest.raises(HTTPException) as exc:
+            await asyncio.wait_for(auth.cached_oidc_json('https://id.example/keys', kind='jwks'), timeout=.5)
+    assert exc.value.status_code == 503

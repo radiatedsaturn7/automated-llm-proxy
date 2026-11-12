@@ -1,0 +1,29 @@
+name: Parser properties
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: parser-properties-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  request-json:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install locked runtime only
+        run: |
+          python3.12 -m venv .fuzz-venv
+          .fuzz-venv/bin/python -m pip install --require-hashes -r requirements.lock
+      - name: Exercise deterministic request JSON properties
+        timeout-minutes: 2
+        run: |
+          git rev-parse HEAD
+          .fuzz-venv/bin/python tests/fuzz/request_json.py --seed 20261112 --cases 10000
+          .fuzz-venv/bin/python tests/fuzz/request_json.py --seed 947203 --cases 10000

@@ -146,8 +146,9 @@ universal security guarantees or successful acceptance in an operator's environm
   pending reservations and revocations before restoring traffic to old state.
 - [ ] Rehearse gateway/provider-key replacement and installation-secret recovery.
   Provider secrets are encrypted, not recoverable without the master key.
-  Installation master/signing-key rotation is not an automatic multi-key migration;
-  do not simply replace environment variables and assume existing state works.
+  Rehearse the bounded, fenced installation encryption-key maintenance tool,
+  including dry run, rollback and stale-replica rejection. Signing-key migration
+  remains unsupported; do not simply replace environment variables.
 - [ ] Exercise target-platform disruption: graceful drain, SIGKILL, failed rollout,
   schema incompatibility, connection exhaustion, database failover and partitions.
   The included worker-loss drill proves surviving-worker requests when explicitly
@@ -188,7 +189,8 @@ raw user content and secret-bearing dumps out of that record. A deferred item
 must have an explicit risk owner; do not silently convert it into a passing check.
 Internal readiness decisions do not imply an external audit has occurred.
 
-For the current single-master-key limits and a cautious recovery/compromise
-checklist, see [encryption key operations](encryption-key-operations.md). Mounted
-secret delivery is not automatic key rotation; a future fenced re-encryption
-mechanism is a design proposal, not an available command.
+For the implemented maintenance-window encryption rotation tool, backup and
+recovery checklist, and remaining signing-key limitations, see
+[encryption key operations](encryption-key-operations.md). Mounted secret delivery
+is not automatic key rotation; rehearse the complete procedure on a restored
+copy before any deployment-key change.

@@ -43,7 +43,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- fail "Use dedicated chart settings rather than duplicate extraEnv configuration" -}}
 {{- end -}}
 {{- if $mounted -}}
-{{- if or (has .name (list "DATABASE_URL" "GATEWAY_MASTER_KEY" "GATEWAY_SIGNING_KEY" "BOOTSTRAP_TOKEN" "METRICS_TOKEN" "OIDC_CLIENT_SECRET")) (hasSuffix "_FILE" .name) -}}
+{{- if or (has .name (list "DATABASE_URL" "GATEWAY_MASTER_KEY" "GATEWAY_SIGNING_KEY" "BOOTSTRAP_TOKEN" "METRICS_TOKEN" "OIDC_CLIENT_SECRET" "GATEWAY_MASTER_DECRYPT_KEYS")) (hasSuffix "_FILE" .name) -}}
 {{- fail "Mounted-secret mode rejects competing secret extraEnv entries" -}}
 {{- end -}}
 {{- end -}}

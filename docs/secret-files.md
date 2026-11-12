@@ -71,17 +71,20 @@ trusted mounts and selectors in your deployment, avoiding envFrom direct-secret
 conflicts. ExternalSecrets can also continue supplying the existing env-based
 chart without this file mode.
 
-**Mounted file replacement is not cryptographic key rotation.** The master key
-is currently a single Fernet encryption key for provider credentials (and any
-other master-key-protected material). Replacing it without a separate verified
-reencryption procedure makes existing ciphertext unreadable. The signing key
-also keys credential/session/OIDC digests, JWT signatures and export cursor
-signatures. Replacing it can make existing keys/sessions unfindable and invalidate
-tokens/cursors. There is no automatic multi-key migration or overlap window.
-Retain stable keys for ordinary rollouts and preserve protected recovery copies
-alongside encrypted backups. Plan an independently tested rotation/recovery
-procedure before changing either key; do not roll mixed cryptographic values
-across replicas and call that a seamless rotation.
+**Mounted file replacement is not cryptographic key rotation.** Provider
+credentials and local MFA seeds use the primary Fernet key, with a bounded
+explicit decryption keyring. Use the [maintenance encryption rotation
+procedure](encryption-key-operations.md), including verified backups, traffic
+drain, generation inspection, dry run, atomic reencryption and replica restart.
+Simply replacing the primary makes a replica fail the database generation fence.
+This is not a zero-downtime or automatic hot-reload mechanism. Older binaries and
+direct database writers must be removed separately.
+
+The signing key also keys credential/session/OIDC digests, JWT signatures and
+export cursor signatures. Its replacement can make existing keys/sessions
+unfindable and invalidate tokens/cursors; the encryption rotation tool does not
+migrate signing material. Retain stable keys for ordinary rollouts and preserve
+protected recovery copies alongside encrypted backups.
 
 Multiple files are read separately, not as an atomic multi-secret snapshot.
 A projection swap during startup could otherwise mix generations. Use an

@@ -93,7 +93,8 @@ def test_invalid_enrollment_policy_rejected(setting):
 
 def test_mounted_secrets_shared_by_app_migration_and_cleanup():
     docs = render('existingSecret=', 'mountedSecrets.existingSecret=install-v7',
-                  'mountedSecrets.keys.OIDC_CLIENT_SECRET=oidc-client', 'maintenance.enabled=true',
+                  'mountedSecrets.keys.OIDC_CLIENT_SECRET=oidc-client',
+                  'mountedSecrets.keys.GATEWAY_MASTER_DECRYPT_KEYS=decrypt-fallbacks', 'maintenance.enabled=true',
                   'localPassword.enabled=true', 'localPassword.mfaPolicy=required')
     pods = []
     for doc in docs:
@@ -110,7 +111,7 @@ def test_mounted_secrets_shared_by_app_migration_and_cleanup():
         assert env['GATEWAY_SECRETS_DIR'] == '/run/secrets/thunderbolt'
         assert env['LOCAL_PASSWORD_ENABLED'] == 'true' and env['LOCAL_MFA_POLICY'] == 'required'
         names = {'DATABASE_URL', 'GATEWAY_MASTER_KEY', 'GATEWAY_SIGNING_KEY', 'BOOTSTRAP_TOKEN',
-                 'METRICS_TOKEN', 'OIDC_CLIENT_SECRET'}
+                 'METRICS_TOKEN', 'OIDC_CLIENT_SECRET', 'GATEWAY_MASTER_DECRYPT_KEYS'}
         assert not names.intersection(env)
         for name in names:
             assert env[name + '_FILE'] == '/run/secrets/thunderbolt/' + name

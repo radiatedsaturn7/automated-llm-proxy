@@ -20,6 +20,9 @@ async def inspect_installation():
                 return {"ok": False, "checks": checks, "reason": "Schema version requires migration"}
             await connection.run_sync(validate_head)
             checks["schema"] = True
+            from .encryption import matches
+            if not matches((await connection.execute(select(db.PolicyLock.master_key_fingerprint))).scalar()):
+                return {"ok": False, "checks": checks, "reason": "Installation encryption key does not match database"}
             count = 0
             async with connection.stream(select(db.Provider.encrypted_key)) as rows:
                 async for row in rows:

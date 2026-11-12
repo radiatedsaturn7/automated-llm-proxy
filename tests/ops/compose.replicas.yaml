@@ -4,6 +4,8 @@ services:
     volumes:
       - ./tests/ops/load_provider.py:/mock/server.py:ro
   gateway:
+    environment:
+      GATEWAY_MASTER_DECRYPT_KEYS: ${GATEWAY_MASTER_DECRYPT_KEYS:-[]}
     restart: 'no'
     ports: !override ['127.0.0.1:8180:8080']
   gateway-peer:
@@ -11,6 +13,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Set disposable DATABASE_URL}
       GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?Set disposable key}
+      GATEWAY_MASTER_DECRYPT_KEYS: ${GATEWAY_MASTER_DECRYPT_KEYS:-[]}
       GATEWAY_SIGNING_KEY: ${GATEWAY_SIGNING_KEY:?Set disposable key}
       BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:?Set disposable token}
       ALLOW_PRIVATE_PROVIDER_HOSTS: 'true'

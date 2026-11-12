@@ -168,3 +168,29 @@ def test_shutdown_budget_and_prestop_rendered():
 ])
 def test_invalid_shutdown_budget_fails_closed(settings):
     render(*settings, success=False)
+
+
+def test_azure_workload_identity_defaults_and_opt_in():
+    default = next(d for d in render() if d['kind'] == 'Deployment')['spec']['template']
+    assert 'azure.workload.identity/use' not in default['metadata']['labels']
+    docs = render('azureWorkloadIdentity.enabled=true',
+                  'azureWorkloadIdentity.allowedEndpoints[0]=https://example.openai.azure.com/openai/v1')
+    deployment = next(d for d in docs if d['kind'] == 'Deployment')['spec']['template']
+    assert deployment['metadata']['labels']['azure.workload.identity/use'] == 'true'
+    assert deployment['spec']['automountServiceAccountToken'] is False
+    env = {e['name']: e.get('value') for e in deployment['spec']['containers'][0]['env']}
+    assert env['AZURE_WORKLOAD_IDENTITY_ENABLED'] == 'true'
+    assert env['AZURE_WORKLOAD_IDENTITY_ALLOWED_ENDPOINTS'] == '["https://example.openai.azure.com/openai/v1"]'
+
+
+@pytest.mark.parametrize('setting', [
+    'azureWorkloadIdentity.enabled=true',
+    'azureWorkloadIdentity.allowedEndpoints[0]=https://evil.example/openai/v1',
+    'azureWorkloadIdentity.allowedEndpoints[0]=http://example.openai.azure.com/openai/v1',
+])
+def test_azure_workload_identity_invalid_chart_values(setting):
+    render(setting, success=False)
+
+
+def test_azure_workload_identity_duplicate_env_rejected():
+    render('extraEnv[0].name=AZURE_WORKLOAD_IDENTITY_ENABLED', 'extraEnv[0].value=true', success=False)

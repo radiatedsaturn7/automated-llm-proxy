@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     max_inflight_operations: int = Field(default=8, ge=1, le=128)
     max_request_bytes: int = Field(default=1_048_576, ge=1024, le=10_485_760)
     max_output_tokens: int = Field(default=4096, ge=1, le=32768)
+    azure_workload_identity_enabled: bool = False
+    azure_workload_identity_allowed_endpoints: str = "[]"
+    azure_identity_timeout_seconds: float = Field(default=10, ge=1, le=60, allow_inf_nan=False)
     allow_private_provider_hosts: bool = False
     circuit_breaker_enabled: bool = True
     circuit_failure_threshold: int = Field(default=3, ge=1, le=100)
@@ -89,6 +92,9 @@ class Settings(BaseSettings):
                 raise ValueError()
         except Exception:
             raise ValueError("Invalid installation encryption key configuration") from None
+        from .azure_identity import validate_endpoint_list
+        validate_endpoint_list(self.azure_workload_identity_allowed_endpoints,
+                               self.azure_workload_identity_enabled)
         public = urlparse(self.public_url)
         if (public.scheme not in {"http", "https"} or not public.hostname or public.username
                 or public.password or public.query or public.fragment):

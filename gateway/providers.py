@@ -34,8 +34,14 @@ def upstream_request(provider, route, payload, endpoint):
         return request(provider, route, payload, endpoint)
     body = dict(payload)
     body["model"] = route["upstream_model"]
-    if provider.kind in {"openai", "azure_openai"}:
+    if provider.kind in {"openai", "azure_openai", "azure_openai_workload_identity"}:
         headers = {"Content-Type": "application/json"}
+        if provider.kind == "azure_openai_workload_identity":
+            from .azure_identity import check_endpoint
+            check_endpoint(provider.base_url)
+            if body.get("stream"):
+                body["stream_options"] = {"include_usage": True}
+            return provider.base_url + "/" + endpoint, headers, body
         credential = decrypt(provider.encrypted_key)
         if provider.kind == "azure_openai":
             # Azure OpenAI v1: base_url ends /openai/v1; model is deployment name.
@@ -384,7 +390,7 @@ def translate_response(provider, data, model, endpoint=None, payload=None):
         return response(data, model)
     if data.get("error"):
         raise ValueError("Provider returned error object")
-    if provider.kind in {"openai", "azure_openai"}:
+    if provider.kind in {"openai", "azure_openai", "azure_openai_workload_identity"}:
         return data
     if provider.kind == "gemini":
         if endpoint is not None and (endpoint == 'embeddings') != ('embeddings' in data):
@@ -442,7 +448,7 @@ class StreamTranslator:
             raise ValueError("Invalid SSE event")
         if event.get("error"):
             raise ValueError("Provider stream failed")
-        if self.provider.kind in {"openai", "azure_openai"}:
+        if self.provider.kind in {"openai", "azure_openai", "azure_openai_workload_identity"}:
             if isinstance(event, dict) and event.get("usage"):
                 self.usage = event["usage"]
             return event

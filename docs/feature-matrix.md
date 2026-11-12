@@ -8,10 +8,11 @@ This is a working foundation under active development, **not** a fully enterpris
 | Users and teams | Primary and explicit secondary memberships; scoped team administrators; shared user and selected-team budgets | Not arbitrary RBAC; SCIM/OIDC maintain primary membership only; delegated API keys cannot exceed caller limits |
 | Virtual credentials | Explicit inference/admin/account/provisioning/team_admin permissions, expiry, revocation, rotation, model scopes and rate allowances | Permissions cannot elevate user role; rotation preserves authorization and expiry |
 | Installation encryption | Bounded maintenance-only dry run and atomic provider/MFA reencryption with database generation fencing and explicit reverse procedure | Drain traffic and remove older binaries/direct writers; backups and replica restarts required; no automatic signing-key migration or zero-downtime claim |
-| Provider abstraction | OpenAI-compatible, Azure OpenAI v1, Anthropic and native Gemini text adapters | Stateless non-streaming text Responses compatibility; not full vendor API parity; validate supported request types |
+| Provider abstraction | OpenAI-compatible, Azure OpenAI v1, Anthropic, native Gemini text and bounded Bedrock Converse adapters | Stateless non-streaming text Responses compatibility; [Bedrock](bedrock.md) is bearer-key, nonstreaming text only, without AWS SigV4/role refresh; not full vendor API parity |
 | Spending control | Shared reservations and UTC monthly accounting | Prices operator-maintained; crash reconciliation required; not invoice reconciliation |
 | SSO | OIDC with explicit group mapping and browser sessions | SCIM Users/Groups provisioning subset and explicit offboarding; default-off local passwords and signed back-channel logout; local TOTP option; no SAML or IdP certification |
-| Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Member portal manages own existing credentials; delegated team UI supports scoped membership and inference-key administration, not arbitrary custom roles |
+| Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Member portal manages own credentials and can [create keys](member-key-creation.md) only under a default-off admin template; delegated team UI is scoped, not arbitrary custom roles |
+| Member history and allowances | [Own-usage history](member-usage.md) with owner-bound cursors; default-off [daily request allowances and up to four monthly reset credits](usage-resets.md) | Query windows are not retention limits; resets never clear billing, pending reservations, hard budgets or rate limits |
 | Local relay | Authenticated loopback forwarding and short-lived access-token renewal; opt-in durable agent-secret rollover | Optional operator-bounded SSO enrollment uses a protected client journal; original expiry remains; no provider-key rotation or claim of RFC 8628 protocol compatibility |
 | Evaluation | Immutable plaintext prompt registry, saved deterministic reports, paired regression gates and opt-in gateway model evaluation CLI | Explicitly saved templates are stored; runner execution can incur provider charges; no LLM judges or quality/safety certification |
 | Deployment | Container/Helm/Terraform examples and [native Linux systemd units](systemd-deployment.md) with explicit migration | Infrastructure must be supplied/validated; systemd syntax checks are not VM deployment acceptance or certification |
@@ -20,6 +21,14 @@ This is a working foundation under active development, **not** a fully enterpris
 | Advanced reliability | DB-shared per-model circuits, next-request routing, leased half-open probes and stale-completion fencing | No same-request replay, automatic model equivalence, exactly-once inference or failover SLA |
 | Extensibility | Explicit source-level provider adapters | No untrusted plugin loader or isolation sandbox |
 | Governance | Model scopes, privileged provider configuration and opt-in inbound/output block/redact heuristics | Fixed reviewed detectors; output policy rejects streaming and unsupported content; no complete DLP coverage, moderation suite, compliance attestation or data residency enforcement |
+
+## Compliance and assurance boundaries
+
+The [applicability/shared-responsibility matrix](compliance-applicability.md),
+[data inventory](data-inventory.md) and [SSDF evidence map](ssdf-evidence.md)
+distinguish source controls from operator obligations and missing workflows.
+No legal compliance determination, SOC 2 report, ISO certification or independent
+security audit is claimed.
 
 ## Verification status
 

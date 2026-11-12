@@ -240,6 +240,9 @@ async def infer(request, endpoint):
     try:
         try:
             url, headers, body = upstream_request(provider, route, payload, endpoint)
+            if provider.kind == "azure_openai_workload_identity":
+                from .azure_identity import authorization
+                headers["Authorization"] = await authorization(request.app, provider.base_url)
             # Serialize before reserving or attributing failures to the provider.
             # A local encoding/build failure proves no upstream dispatch occurred.
             headers = {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}

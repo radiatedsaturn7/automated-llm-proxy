@@ -6,7 +6,51 @@ Configure `kind: openai`, an HTTPS API-prefix base URL (for example `https://api
 
 ## Azure OpenAI v1
 
-Configure `kind: azure_openai`, base URL `https://RESOURCE.openai.azure.com/openai/v1`, API key, and deployment name as `upstream_model`. Uses the `api-key` header. Supports v1 text chat, tools, streaming and embeddings. Legacy dated `api-version` query APIs and Microsoft Entra managed-identity credentials are not implemented. No Azure-specific resources are created by Brrrtgate.
+Configure `kind: azure_openai`, base URL `https://RESOURCE.openai.azure.com/openai/v1`, API key, and deployment name as `upstream_model`. Uses the `api-key` header. Supports v1 text chat, tools, streaming and embeddings. Legacy dated `api-version` query APIs are not implemented. API-key mode is unchanged; federated workload identity is a separate opt-in mode below. No Azure-specific resources are created by Brrrtgate.
+
+### Azure federated workload identity (opt-in)
+
+Use `kind: azure_openai_workload_identity`, omit the API key, and use a public-Azure
+resource URL `https://RESOURCE.openai.azure.com/openai/v1`. This mode uses the
+explicit asynchronous Azure `WorkloadIdentityCredential`, not the general default
+credential chain. The scope is fixed to `https://cognitiveservices.azure.com/.default`.
+No per-provider token files, custom identity authority or audience are accepted.
+
+The deployment operator must enable `AZURE_WORKLOAD_IDENTITY_ENABLED=true` and set
+`AZURE_WORKLOAD_IDENTITY_ALLOWED_ENDPOINTS` to a JSON array of exact permitted
+resource URLs. This endpoint boundary prevents a gateway administrator from
+redirecting the workload's bearer token to an arbitrary host. An endpoint not on
+the deployment list fails closed. Keep the existing outbound network restrictions.
+The identity's Azure resource RBAC must also be least-privilege; the allowlist does
+not replace Azure authorization.
+
+For AKS, configure the cluster OIDC issuer, Azure workload-identity webhook, a
+federated credential for the gateway service account, and Azure OpenAI resource
+RBAC before installing the chart. Set:
+
+```yaml
+azureWorkloadIdentity:
+  enabled: true
+  allowedEndpoints:
+    - https://RESOURCE.openai.azure.com/openai/v1
+serviceAccount:
+  annotations:
+    azure.workload.identity/client-id: YOUR-APPLICATION-CLIENT-ID
+```
+
+The chart adds `azure.workload.identity/use: "true"` to the gateway pod. The AKS
+webhook supplies the projected service-account token and the deployment-owned
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_FEDERATED_TOKEN_FILE` environment
+variables. Ordinary Kubernetes API token automount remains disabled. The chart
+neither provisions the Azure application/federation/RBAC nor stores an Azure key.
+Non-AKS installations must provide a compatible federated token through their
+trusted identity platform; never use a client-supplied token file.
+
+Only public Azure is supported in this increment, not sovereign clouds, VM IMDS
+managed identity, client secrets or interactive developer credentials. Tests use
+mock tokens and HTTP transports. Actual AKS federation, resource RBAC, network
+policy and live deployment inference require operator acceptance; synthetic tests
+are not a cloud certification or successful live authentication claim.
 
 ## Anthropic
 

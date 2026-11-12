@@ -28,7 +28,7 @@ collisions conservatively share limits. Successful attempts also count. The sock
 peer address is used, not untrusted forwarding headers. Configure the deployment's
 trusted proxy handling correctly; a shared ingress address conservatively shares limits.
 
-Limitations: no phishing-resistant local MFA, breached-password service, self-service change or recovery,
+Limitations: no phishing-resistant local MFA, breached-password service, self-service recovery,
 or forced first-login reset. For workforce production authentication use an MFA-enforcing
 identity provider. Admin-managed local accounts are an optional fallback, not an SSO substitute.
 
@@ -37,6 +37,11 @@ because historical SCIM users may lack an external ID. Their API/SSO behavior is
 unchanged, but they cannot gain a local password. Create a new, explicit local user
 for fallback login. New SCIM-created or SCIM-managed accounts are marked managed
 and any previous local credential is erased. There is no automatic unlink/bypass.
+
+Members can change their password from `/portal`, supplying the current password
+and a fresh enrolled TOTP code. This revokes all browser sessions and pending
+MFA challenges but preserves the active factor and API keys. See
+[member self-service](self-service.md#account-security).
 
 ## Optional local TOTP MFA (schema revision 12)
 

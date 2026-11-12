@@ -16,8 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: {python-version: '3.12'}
       - run: python -m pip install "uv==$UV_VERSION"
       - name: Install locked test and runtime dependencies
@@ -37,7 +39,7 @@ jobs:
           cp pyproject.toml uv.lock requirements.lock dependency-evidence/
           uv run --no-sync python -m pip list --format=json > dependency-evidence/installed.json
           printf '%s\n' "$GITHUB_SHA" > dependency-evidence/tested-commit.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dependency-evidence-${{ github.sha }}
           path: dependency-evidence/
@@ -47,10 +49,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4.3.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
         with: {version: v3.17.3}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: {python-version: '3.12'}
       - run: python -m pip install "uv==$UV_VERSION"
       - run: uv sync --locked --extra dev --extra sdk-test
@@ -63,16 +67,16 @@ jobs:
       - run: helm lint deploy/helm/llm-gateway --set existingSecret=test-secret
       - run: helm template test deploy/helm/llm-gateway --set existingSecret=test-secret > /tmp/rendered.yaml
       - run: helm template test deploy/helm/llm-gateway -f deploy/helm/llm-gateway/values-ha.yaml --set existingSecret=test-secret --set networkPolicy.enabled=true > /tmp/rendered-ha.yaml
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with: {terraform_version: '1.10.5'}
       - run: terraform -chdir=deploy/terraform fmt -check
       - run: terraform -chdir=deploy/terraform init -backend=false
       - run: terraform -chdir=deploy/terraform validate
       - run: docker build -t automated-llm-proxy:ci .
       - name: Validate Prometheus alert rules
-        run: docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/rules:ro" prom/prometheus:v3.2.1 check rules /rules/prometheus-alerts.yaml
+        run: docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/rules:ro" prom/prometheus:v3.2.1@sha256:6927e0919a144aa7616fd0137d4816816d42f6b816de3af269ab065250859a62 check rules /rules/prometheus-alerts.yaml
       - name: Test Prometheus alert behavior
-        run: docker run --rm --entrypoint /bin/promtool -w /rules -v "$PWD/deploy/monitoring:/rules:ro" prom/prometheus:v3.2.1 test rules /rules/prometheus-alerts.test.yaml
+        run: docker run --rm --entrypoint /bin/promtool -w /rules -v "$PWD/deploy/monitoring:/rules:ro" prom/prometheus:v3.2.1@sha256:6927e0919a144aa7616fd0137d4816816d42f6b816de3af269ab065250859a62 test rules /rules/prometheus-alerts.test.yaml
       - name: Validate Grafana dashboard structure
         run: python tests/browser/check-monitoring.py
 
@@ -81,7 +85,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
         env:
           POSTGRES_USER: gateway
           POSTGRES_PASSWORD: test-only-password
@@ -93,8 +97,10 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql+asyncpg://gateway:test-only-password@localhost:5432/gateway_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
       - run: python -m pip install "uv==$UV_VERSION"
@@ -114,8 +120,10 @@ jobs:
       COMPOSE_FILE: compose.yaml:tests/browser/compose.mock.yaml
       MOCK_PROVIDER_URL: https://mock-provider:8443/v1
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -189,8 +197,10 @@ jobs:
       COMPOSE_PROJECT_NAME: thunderbolt-oidc-ci
       NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/tests/oidc/generated/tls.crt
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm

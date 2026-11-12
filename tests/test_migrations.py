@@ -301,3 +301,27 @@ async def test_v15_adds_disabled_allowances_without_altering_users(migration_eng
         assert (await connection.execute(select(db.User.__table__.c.budget_micros))).scalar() == 1234
         assert not (await connection.execute(select(db.UserAllowance.__table__))).all()
     await migrate()
+
+
+async def test_v16_indexes_member_history_without_changing_usage(migration_engine):
+    from datetime import datetime, timezone
+    from gateway.migrations import REVISIONS, v0015
+    async with migration_engine.begin() as connection:
+        await connection.run_sync(version_metadata.create_all)
+        for number, revision in REVISIONS:
+            if number > 15:
+                break
+            await connection.run_sync(revision.upgrade)
+            await connection.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
+        await connection.execute(v0015.metadata.tables['usage'].insert().values(
+            id='existing', reservation_id='existing-reservation', user_id='existing-user',
+            key_id='existing-key', period='2030-06', model='chat', provider_id='existing-provider',
+            input_tokens=11, output_tokens=13, cost_micros=1234, estimated=True,
+            created_at=datetime.now(timezone.utc)))
+    await migrate()
+    async with migration_engine.connect() as connection:
+        assert (await connection.execute(select(db.Usage.__table__.c.cost_micros))).scalar() == 1234
+        indexes = await connection.run_sync(lambda conn: inspect(conn).get_indexes('usage'))
+        assert any(index['name'] == 'ix_usage_user_created_id'
+                   and index['column_names'] == ['user_id', 'created_at', 'id'] for index in indexes)
+    await migrate()

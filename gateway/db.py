@@ -171,7 +171,8 @@ class Usage(Base):
     __tablename__ = "usage"
     __table_args__ = (Index("ix_usage_user_period", "user_id", "period"),
                       Index("ix_usage_team_period", "team_id", "period"),
-                      Index("ix_usage_created_id", "created_at", "id"))
+                      Index("ix_usage_created_id", "created_at", "id"),
+                      Index("ix_usage_user_created_id", "user_id", "created_at", "id"))
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     reservation_id: Mapped[str] = mapped_column(String(36), unique=True)
     user_id: Mapped[str] = mapped_column(String(36))

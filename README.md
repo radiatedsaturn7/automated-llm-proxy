@@ -56,6 +56,7 @@ uv run --no-sync ruff check .
 - [Versioned migrations and legacy adoption](docs/migrations.md)
 - [Prompt registry and evaluation reports](docs/prompts.md)
 - [Member self-service](docs/self-service.md)
+- [Member settled usage history](docs/member-usage.md)
 - [Optional daily request allowances and bounded usage resets](docs/usage-resets.md)
 - [Credential permissions and least-privilege integrations](docs/credential-permissions.md)
 - [Audit/usage export and signed pagination](docs/audit-export.md)

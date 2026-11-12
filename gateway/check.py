@@ -10,7 +10,7 @@ from .security import decrypt
 
 
 async def inspect_installation():
-    checks = {"configuration": True, "schema": False, "provider_credentials": False}
+    checks = {"configuration": True, "schema": False, "provider_credentials": False, "mfa_seeds": False}
     async with db.engine.connect() as connection:
         async with connection.begin():
             if connection.dialect.name == "postgresql":
@@ -29,6 +29,17 @@ async def inspect_installation():
                         return {"ok": False, "checks": checks, "reason": "Stored provider credential cannot be decrypted"}
                     count += 1
             checks["provider_credentials"] = True
+            async with connection.stream(select(db.LocalMFA.seed, db.LocalMFA.pending_seed)) as rows:
+                async for row in rows:
+                    for value in row:
+                        if value is not None:
+                            try:
+                                import base64
+                                if len(base64.b32decode(decrypt(value))) != 20:
+                                    raise ValueError("Invalid seed")
+                            except (InvalidToken, UnicodeError, ValueError, TypeError):
+                                return {"ok": False, "checks": checks, "reason": "Stored MFA seed cannot be decrypted or is invalid"}
+            checks["mfa_seeds"] = True
     return {"ok": True, "checks": checks, "providers_checked": count, "schema_revision": HEAD,
             "scope": "Local configuration, database schema and credential decryption only; no upstream or SSO validation"}
 

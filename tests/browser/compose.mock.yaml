@@ -22,6 +22,7 @@ services:
       dockerfile: tests/browser/mock-provider/Dockerfile.gateway
     environment:
       ALLOW_PRIVATE_PROVIDER_HOSTS: 'true'
+      LOCAL_PASSWORD_ENABLED: 'true'  # Disposable browser acceptance only.
     depends_on:
       mock-provider:
         condition: service_healthy

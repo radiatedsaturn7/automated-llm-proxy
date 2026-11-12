@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, or_
 from . import db
 
 
@@ -26,9 +26,21 @@ async def cleanup(*, apply=False, batch_size=1000):
             counts[model.__tablename__] = len(ids)
             if apply and ids:
                 await session.execute(delete(model).where(key.in_(ids)))
+        factors = list((await session.scalars(select(db.LocalMFA).where(or_(
+            db.LocalMFA.grant_expires < cutoff, db.LocalMFA.challenge_expires < cutoff
+        )).order_by(db.LocalMFA.user_id).limit(batch_size))).all())
+        if apply:
+            from .security import aware
+            for factor in factors:
+                if factor.grant_expires and aware(factor.grant_expires) < cutoff:
+                    factor.grant_digest, factor.grant_expires = None, None
+                if factor.challenge_expires and aware(factor.challenge_expires) < cutoff:
+                    factor.challenge_digest, factor.challenge_expires = None, None
+                    factor.pending_seed, factor.password_binding = None, None
+                    factor.attempts = 0
         if apply:
             await db.audit(session, "maintenance", "maintenance.cleanup", counts=counts)
-    return {"applied": apply, "batch_size": batch_size, "eligible_in_batch": counts}
+    return {"applied": apply, "batch_size": batch_size, "eligible_in_batch": counts, "mfa_transient_rows": len(factors)}
 
 
 async def run(args):

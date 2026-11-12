@@ -89,3 +89,57 @@ def test_enrollment_chart_defaults_and_finite_opt_in():
 @pytest.mark.parametrize('setting', ['enrollment.enabled=true','enrollment.keyDays=91','enrollment.rpm=0','enrollment.maxPending=10001'])
 def test_invalid_enrollment_policy_rejected(setting):
     render(setting, success=False)
+
+
+def test_mounted_secrets_shared_by_app_migration_and_cleanup():
+    docs = render('existingSecret=', 'mountedSecrets.existingSecret=install-v7',
+                  'mountedSecrets.keys.OIDC_CLIENT_SECRET=oidc-client', 'maintenance.enabled=true',
+                  'localPassword.enabled=true', 'localPassword.mfaPolicy=required')
+    pods = []
+    for doc in docs:
+        if doc['kind'] in ('Deployment', 'Job'):
+            pods.append(doc['spec']['template']['spec'])
+        elif doc['kind'] == 'CronJob':
+            pods.append(doc['spec']['jobTemplate']['spec']['template']['spec'])
+    assert len(pods) == 3
+    for pod in pods:
+        assert pod['securityContext']['fsGroup'] == 10001
+        container = pod['containers'][0]
+        assert 'envFrom' not in container
+        env = {x['name']: x['value'] for x in container['env']}
+        assert env['GATEWAY_SECRETS_DIR'] == '/run/secrets/thunderbolt'
+        assert env['LOCAL_PASSWORD_ENABLED'] == 'true' and env['LOCAL_MFA_POLICY'] == 'required'
+        names = {'DATABASE_URL', 'GATEWAY_MASTER_KEY', 'GATEWAY_SIGNING_KEY', 'BOOTSTRAP_TOKEN',
+                 'METRICS_TOKEN', 'OIDC_CLIENT_SECRET'}
+        assert not names.intersection(env)
+        for name in names:
+            assert env[name + '_FILE'] == '/run/secrets/thunderbolt/' + name
+        mount = next(x for x in container['volumeMounts'] if x['name'] == 'installation-secrets')
+        assert mount['readOnly'] and mount['mountPath'] == env['GATEWAY_SECRETS_DIR']
+        secret = next(x['secret'] for x in pod['volumes'] if x['name'] == 'installation-secrets')
+        assert secret['secretName'] == 'install-v7' and secret['defaultMode'] == 0o440
+        assert {x['path'] for x in secret['items']} == names
+        assert next(x['key'] for x in secret['items'] if x['path'] == 'OIDC_CLIENT_SECRET') == 'oidc-client'
+
+
+@pytest.mark.parametrize('settings', [
+    ['mountedSecrets.existingSecret=also-set'],
+    ['existingSecret='],
+    ['existingSecret=', 'mountedSecrets.existingSecret=files', 'mountedSecrets.keys.UNKNOWN=x'],
+    ['existingSecret=', 'mountedSecrets.existingSecret=files', 'mountedSecrets.keys.DATABASE_URL=../escape'],
+    ['existingSecret=', 'mountedSecrets.existingSecret=files', 'extraEnv[0].name=DATABASE_URL', 'extraEnv[0].value=bad'],
+    ['existingSecret=', 'mountedSecrets.existingSecret=files', 'extraEnv[0].name=GATEWAY_MASTER_KEY_FILE', 'extraEnv[0].value=/other'],
+    ['extraEnv[0].name=LOCAL_MFA_POLICY', 'extraEnv[0].value=optional'],
+    ['extraEnv[0].name=GATEWAY_SECRETS_DIR', 'extraEnv[0].value=/other'],
+    ['localPassword.mfaPolicy=disabled'],
+])
+def test_secret_and_mfa_configuration_rejects_conflicts(settings):
+    render(*settings, success=False)
+
+
+def test_local_password_defaults_disabled_without_secret_volume():
+    deployment = next(doc for doc in render() if doc['kind'] == 'Deployment')
+    pod = deployment['spec']['template']['spec']
+    env = {x['name']: x['value'] for x in pod['containers'][0]['env']}
+    assert env['LOCAL_PASSWORD_ENABLED'] == 'false' and env['LOCAL_MFA_POLICY'] == 'optional'
+    assert all(x['name'] != 'installation-secrets' for x in pod['volumes'])

@@ -10,6 +10,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", extra="ignore", hide_input_in_errors=True)
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
+        from .secret_files import source
+        mounted = source(init_settings, env_settings, dotenv_settings, file_secret_settings)
+        return (mounted, init_settings, env_settings, dotenv_settings, file_secret_settings)
+
     database_url: str = "sqlite+aiosqlite:///./gateway.db"
     db_pool_size: int = Field(default=10, ge=1, le=200)
     db_max_overflow: int = Field(default=20, ge=0, le=200)
@@ -25,6 +32,7 @@ class Settings(BaseSettings):
     environment: Literal["development", "production"] = "development"
     public_url: str = "http://localhost:8080"
     local_password_enabled: bool = False
+    local_mfa_policy: Literal["optional", "required"] = "optional"
     local_session_seconds: int = Field(default=3600, ge=300, le=28800)
     oidc_issuer: str = ""
     oidc_client_id: str = ""

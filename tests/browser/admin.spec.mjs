@@ -1,6 +1,24 @@
 import { test, expect } from '@playwright/test';
+import { createHmac, randomBytes } from 'node:crypto';
+
+function totp(secret, counter) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const char of secret) {
+    const value = alphabet.indexOf(char);
+    if (value < 0) throw new Error('Invalid disposable authenticator encoding');
+    bits += value.toString(2).padStart(5, '0');
+  }
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  const message = Buffer.alloc(8); message.writeBigUInt64BE(BigInt(counter));
+  const digest = createHmac('sha1', Buffer.from(bytes)).update(message).digest();
+  const offset = digest[digest.length - 1] & 15;
+  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1000000).padStart(6, '0');
+}
 
 test('fresh installation: real HTTP, bootstrap, administration, scoped keys and logout', async ({ page, request }) => {
+  test.setTimeout(100_000); // Includes at most one 30-second TOTP counter boundary.
   const bootstrapToken = process.env.BOOTSTRAP_TOKEN;
   if (!bootstrapToken) throw new Error('Set BOOTSTRAP_TOKEN and use a fresh disposable database.');
   const errors = [];
@@ -160,5 +178,60 @@ test('fresh installation: real HTTP, bootstrap, administration, scoped keys and 
   await page.reload();
   await expect(page.locator('#workspace')).toBeHidden();
   await expect(page.locator('#new-secret')).toHaveValue('');
+  // Actual local MFA backend + UI, isolated from the administrator's page/context.
+  const adminHeaders = { Authorization: `Bearer ${adminKey}` };
+  const password = randomBytes(24).toString('base64url');
+  expect((await request.put(`/admin/api/users/${user.id}/password`, {
+    headers: adminHeaders, data: { password },
+  })).status()).toBe(204);
+  const grantResponse = await request.post(`/admin/api/users/${user.id}/mfa/setup-grant`, { headers: adminHeaders });
+  expect(grantResponse.status()).toBe(200);
+  const { setup_grant: grant } = await grantResponse.json();
+  const memberContext = await page.context().browser().newContext({ baseURL: new URL(page.url()).origin });
+  const memberPage = await memberContext.newPage();
+  memberPage.on('pageerror', error => errors.push(error.message));
+  let seed = '';
+  try {
+    await memberPage.goto('/admin/static/local-login.html');
+    await memberPage.getByRole('button', { name: 'Set up authenticator', exact: true }).click();
+    await memberPage.getByLabel('Email', { exact: true }).fill(user.email);
+    await memberPage.getByLabel('Password', { exact: true }).fill(password);
+    await memberPage.getByLabel('Setup grant', { exact: true }).fill(grant);
+    await memberPage.getByRole('button', { name: 'Begin setup', exact: true }).click();
+    await expect(memberPage.locator('#seed-panel')).toBeVisible();
+    seed = (await memberPage.locator('#seed').textContent()).trim();
+    expect(Boolean(seed)).toBe(true); // Never include seed/password/grant in assertions or artifacts.
+    expect((await memberContext.request.get('/account/api/profile')).status()).toBe(401);
+    const acceptedCounter = Math.floor(Date.now() / 30000);
+    await memberPage.getByLabel('Authenticator code').fill(totp(seed, acceptedCounter));
+    await memberPage.getByRole('button', { name: 'Verify code', exact: true }).click();
+    await expect(memberPage).toHaveURL(/\/portal$/);
+    await expect(memberPage.locator('#profile')).toContainText(user.email);
+    expect((await memberContext.request.get('/account/api/profile')).status()).toBe(200);
+    await memberPage.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(memberPage.locator('#profile')).toBeEmpty();
+    expect((await memberContext.request.get('/account/api/profile')).status()).toBe(401);
+    await memberPage.goto('/admin/static/local-login.html');
+    await memberPage.getByLabel('Email', { exact: true }).fill(user.email);
+    await memberPage.getByLabel('Password', { exact: true }).fill(password);
+    await memberPage.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(memberPage.locator('#mfa')).toBeVisible();
+    await expect(memberPage.locator('#seed-panel')).toBeHidden();
+    expect((await memberContext.request.get('/account/api/profile')).status()).toBe(401);
+    const delay = Math.max(0, (acceptedCounter + 1) * 30000 + 100 - Date.now());
+    if (delay > 30100) throw new Error('Unexpected disposable clock jump');
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+    await memberPage.getByLabel('Authenticator code').fill(totp(seed, Math.floor(Date.now() / 30000)));
+    await memberPage.getByRole('button', { name: 'Verify code', exact: true }).click();
+    await expect(memberPage).toHaveURL(/\/portal$/);
+    await expect(memberPage.locator('#profile')).toContainText(user.email);
+    expect((await memberContext.request.get('/account/api/profile')).status()).toBe(200);
+    expect((await request.delete(`/admin/api/users/${user.id}/mfa`, { headers: adminHeaders })).status()).toBe(204);
+    expect((await memberContext.request.get('/account/api/profile')).status()).toBe(401);
+    expect(await memberPage.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
+  } finally {
+    seed = '';
+    await memberContext.close();
+  }
   expect(errors).toEqual([]);
 });

@@ -34,10 +34,38 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- end -}}
 {{- end -}}
 {{- define "gateway.env" -}}
+{{- $mounted := .Values.mountedSecrets.existingSecret -}}
+{{- if and $mounted .Values.existingSecret -}}
+{{- fail "Use either existingSecret or mountedSecrets.existingSecret, not both" -}}
+{{- end -}}
+{{- range .Values.extraEnv -}}
+{{- if or (eq .name "LOCAL_PASSWORD_ENABLED") (eq .name "LOCAL_MFA_POLICY") (eq .name "GATEWAY_SECRETS_DIR") -}}
+{{- fail "Use dedicated chart settings rather than duplicate extraEnv configuration" -}}
+{{- end -}}
+{{- if $mounted -}}
+{{- if or (has .name (list "DATABASE_URL" "GATEWAY_MASTER_KEY" "GATEWAY_SIGNING_KEY" "BOOTSTRAP_TOKEN" "METRICS_TOKEN" "OIDC_CLIENT_SECRET")) (hasSuffix "_FILE" .name) -}}
+{{- fail "Mounted-secret mode rejects competing secret extraEnv entries" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not $mounted }}
 envFrom:
   - secretRef:
       name: {{ required "existingSecret is required; pre-create the database and gateway keys" .Values.existingSecret | quote }}
+{{- end }}
 env:
+  {{- if $mounted }}
+  - name: GATEWAY_SECRETS_DIR
+    value: /run/secrets/thunderbolt
+  {{- range $name, $key := .Values.mountedSecrets.keys }}
+  - name: {{ printf "%s_FILE" $name }}
+    value: {{ printf "/run/secrets/thunderbolt/%s" $name | quote }}
+  {{- end }}
+  {{- end }}
+  - name: LOCAL_PASSWORD_ENABLED
+    value: {{ .Values.localPassword.enabled | quote }}
+  - name: LOCAL_MFA_POLICY
+    value: {{ .Values.localPassword.mfaPolicy | quote }}
   - name: ENVIRONMENT
     value: {{ .Values.environment | quote }}
   - name: PUBLIC_URL
@@ -91,4 +119,25 @@ env:
 {{- with .Values.extraEnv }}
   {{- toYaml . | nindent 2 }}
 {{- end }}
+{{- end -}}
+
+{{- define "gateway.secretMount" -}}
+{{- if .Values.mountedSecrets.existingSecret -}}
+- name: installation-secrets
+  mountPath: /run/secrets/thunderbolt
+  readOnly: true
+{{- end -}}
+{{- end -}}
+{{- define "gateway.secretVolume" -}}
+{{- if .Values.mountedSecrets.existingSecret -}}
+- name: installation-secrets
+  secret:
+    secretName: {{ .Values.mountedSecrets.existingSecret | quote }}
+    defaultMode: 0440
+    items:
+      {{- range $name, $key := .Values.mountedSecrets.keys }}
+      - key: {{ $key | quote }}
+        path: {{ $name | quote }}
+      {{- end }}
+{{- end -}}
 {{- end -}}

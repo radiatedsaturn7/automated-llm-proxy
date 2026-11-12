@@ -13,6 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from . import local_mfa  # noqa: F401
 from . import local_auth
 from . import account, admin, agent_rotation, auth, comparisons, db, enrollment, exports, inference, prompts, responses, scim, teams
 from .config import get_settings

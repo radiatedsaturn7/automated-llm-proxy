@@ -55,9 +55,11 @@ spec:
             timeoutSeconds: 3
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
+            {{- include "gateway.secretMount" . | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {sizeLimit: 64Mi}
+        {{- include "gateway.secretVolume" . | nindent 8 }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

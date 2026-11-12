@@ -33,6 +33,7 @@ spec:
             runAsNonRoot: true
             runAsUser: 10001
             runAsGroup: 10001
+            fsGroup: 10001
             seccompProfile: {type: RuntimeDefault}
           containers:
             - name: cleanup
@@ -47,7 +48,9 @@ spec:
                 capabilities: {drop: [ALL]}
               volumeMounts:
                 - {name: tmp, mountPath: /tmp}
+                {{- include "gateway.secretMount" . | nindent 16 }}
           volumes:
             - name: tmp
               emptyDir: {sizeLimit: 64Mi}
+            {{- include "gateway.secretVolume" . | nindent 12 }}
 {{- end }}

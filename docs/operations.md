@@ -248,3 +248,9 @@ not a hard task cap: already admitted requests can enqueue further cleanup.
 Cleanup is never discarded to satisfy the threshold, and operational requests
 remain eligible for their separate pool. The `gateway_inflight_requests` gauge
 and `gateway_overload_rejections_total` counter expose fixed pool/reason labels.
+
+## Native Linux VM deployments
+
+For non-container installations, see the [systemd kit](systemd-deployment.md):
+immutable releases, loopback-only service, file-backed secrets, explicit migration
+oneshot, and operator-controlled drain/upgrade/rollback. It does not provision hosts.

@@ -54,6 +54,10 @@ jobs:
         with: {python-version: '3.12'}
       - run: python -m pip install "uv==$UV_VERSION"
       - run: uv sync --locked --extra dev --extra sdk-test
+      - name: Verify native systemd deployment units
+        run: |
+          command -v systemd-analyze
+          uv run --no-sync python -m pytest --noconftest -q tests/test_systemd_deployment.py
       - name: Validate maintenance chart rendering
         run: uv run --no-sync python -m pytest --noconftest -q tests/test_maintenance_helm.py
       - run: helm lint deploy/helm/llm-gateway --set existingSecret=test-secret

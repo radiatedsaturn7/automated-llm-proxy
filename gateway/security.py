@@ -69,6 +69,7 @@ async def identify(request: Request, allow_session=False):
             browser_session = await session.get(db.BrowserSession, digest(request.cookies["gateway_session"]))
             if not browser_session or aware(browser_session.expires_at) <= db.now():
                 raise HTTPException(401, "Session expired")
+            await check_session_assurance(session, browser_session)
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
                 if not hmac.compare_digest(request.headers.get("x-csrf-token", ""), browser_session.csrf):
                     raise HTTPException(403, "CSRF token required")
@@ -115,6 +116,7 @@ async def revalidate_identity(session, identity):
         if (not browser or browser.user_id != user.id or aware(browser.expires_at) <= db.now()
                 or browser.csrf != identity.session.csrf):
             raise HTTPException(401, "Authorization changed")
+        await check_session_assurance(session, browser)
     else:
         raise HTTPException(401, "Authorization required")
     return Identity(user, key, browser, identity.generation)
@@ -180,3 +182,13 @@ def new_key(user_id, team_id, name, expires_in_days=30, kind="api", **policy):
     key = db.APIKey(name=name, prefix=raw[:11], digest=digest(raw), user_id=user_id, team_id=team_id,
                     kind=kind, expires_at=db.now() + timedelta(days=expires_in_days), **policy)
     return raw, key
+
+
+async def check_session_assurance(session, browser):
+    if browser.oidc_issuer:
+        return
+    cfg = get_settings()
+    factor = await session.get(db.LocalMFA, browser.user_id)
+    if ((cfg.local_mfa_policy == "required" or (factor and factor.seed))
+            and not browser.mfa_verified):
+        raise HTTPException(401, "MFA authentication required")

@@ -9,8 +9,7 @@
   ],
   "properties": {
     "existingSecret": {
-      "type": "string",
-      "minLength": 1
+      "type": "string"
     },
     "replicaCount": {
       "type": "integer",
@@ -324,6 +323,116 @@
           }
         }
       ]
+    },
+    "mountedSecrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "existingSecret",
+        "keys"
+      ],
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "DATABASE_URL",
+            "GATEWAY_MASTER_KEY",
+            "GATEWAY_SIGNING_KEY",
+            "BOOTSTRAP_TOKEN",
+            "METRICS_TOKEN"
+          ],
+          "properties": {
+            "DATABASE_URL": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$",
+              "minLength": 1
+            },
+            "GATEWAY_MASTER_KEY": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$",
+              "minLength": 1
+            },
+            "GATEWAY_SIGNING_KEY": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$",
+              "minLength": 1
+            },
+            "BOOTSTRAP_TOKEN": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$",
+              "minLength": 1
+            },
+            "METRICS_TOKEN": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$",
+              "minLength": 1
+            },
+            "OIDC_CLIENT_SECRET": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "localPassword": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "mfaPolicy"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mfaPolicy": {
+          "type": "string",
+          "enum": [
+            "optional",
+            "required"
+          ]
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "existingSecret": {
+              "minLength": 1
+            },
+            "mountedSecrets": {
+              "properties": {
+                "existingSecret": {
+                  "maxLength": 0
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "existingSecret": {
+              "maxLength": 0
+            },
+            "mountedSecrets": {
+              "properties": {
+                "existingSecret": {
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
 }

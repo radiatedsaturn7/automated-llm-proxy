@@ -8,23 +8,32 @@ plan before admitting sensitive traffic.
 
 ## Evidence checkpoint
 
-This document was prepared during PR #15 (`81cd086` prefix), after PRs #12–14
-were accepted. At this checkpoint, all jobs in
-[CI run 43123234928](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43123234928)
-passed for that head. PR #15 was explicitly approved and merged as
-`e3b514392c2a798229af2c02889f89a71ad485ee`. Green CI is not production
-acceptance. Check [PR #15](https://github.com/radiatedsaturn7/automated-llm-proxy/pull/15)
-and exact-head checks before using later code.
+Latest verified candidate: PR #16 at exact head
+`7acaa9848d9c9873678bd0a31750a5a05bb11589`.
+[CI run 43125212538](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43125212538)
+passed all five jobs: **613 Python tests passed / 8 skipped**, **621 PostgreSQL
+tests passed**, logical backup/restore acceptance passed, **23 Chromium tests
+passed**, **2 actual Keycloak tests passed**, and deployment/monitoring checks
+passed. Dependency audit found no known vulnerabilities. The SDK contracts use
+pinned OpenAI Python 3.49.0 and real ASGI gateway processing with simulated
+upstream responses. No paid provider calls were made.
 
-The coordinator reported 589 Python tests passed with eight skipped, 23 Chromium
-tests passed, and 597 PostgreSQL tests passed. The real logical backup/restore
-drill also passed its authorization, accounting and credential checks. The two-distinct-process drill reported: 40 budget requests with
-five accepted/35 denied and 3,370 microdollars held against a 4,000 limit; 32 rate
+**PR #16 merged as `7af1ab65c351cf658ff24226a4339dc4087b512c`.**
+PR #15 was approved and merged as `e3b514392c2a798229af2c02889f89a71ad485ee`.
+Green CI is not production acceptance or permission to merge. Later round-17
+changes require their own exact-head evidence.
+
+The repeated two-distinct-process drill reported 40 budget requests with five
+accepted/35 denied and 3,370 microdollars held against a 4,000 limit; 32 rate
 requests with six accepted/26 denied; one SIGKILL-interrupted request retaining
 668 microdollars without replay; eight successful survivor/restart requests;
 and 19 settled usage records totaling 95 microdollars plus one pending reservation.
-These are functional fixture results, not production throughput measurements.
-Later changes require their own evidence.
+These are functional synthetic fixture results, not production throughput.
+
+The actual disposable Keycloak tests verified TLS, PKCE, group mapping, CSRF,
+local browser logout and signed back-channel logout. They do not certify other
+IdPs or the organization's configured MFA, rollover and lifecycle policies.
+See [SDK contracts](sdk-compatibility.md) and the exact job logs for scope.
 
 Evidence levels are deliberately separate:
 
@@ -34,6 +43,11 @@ Evidence levels are deliberately separate:
 - **Browser CI:** Chromium against the built Compose service, including real
   bootstrap/admin/provider flows and explicitly mocked session/UI lifecycle tests.
   Mocked SSO state is not a real IdP interoperability test.
+- **Real IdP CI:** separate disposable Keycloak with TLS verification enabled,
+  actual browser authorization and signed logout. Two passing cases cover the
+  stated flows, not every identity-provider configuration.
+- **Official SDK acceptance:** pinned Python client over the actual ASGI gateway;
+  provider HTTP is simulated, so this is not vendor service certification.
 - **Restore drill:** a real disposable PostgreSQL dump/restore with synthetic
   application records and matching installation keys. Not a production backup drill.
 - **Two-worker drill:** two actual gateway processes, shared PostgreSQL and a TLS
@@ -42,6 +56,11 @@ Evidence levels are deliberately separate:
 
 The [CI workflow](../.github/workflows/ci.yml) defines what runs. A test file's
 presence alone is not proof it executed: inspect job logs, skips and exact commit.
+The subsequent round-17 workflow bounds every job to 15 minutes, or 20 minutes
+for PostgreSQL including its restore drill; each full pytest step is limited to
+10 minutes. These are termination bounds, not passing outcomes or a substitute
+for inspecting failures. A forcibly terminated runner may not complete cleanup;
+fixtures remain disposable and must never target production infrastructure.
 
 ## Implemented controls and regression evidence
 
@@ -66,7 +85,7 @@ universal security guarantees or successful acceptance in an operator's environm
   releases hashing capacity before executor work finishes. See
   [local password limits](local-passwords.md), [tests](../tests/test_local_auth.py),
   [cancellation regression](../tests/test_review_hash_cancellation.py).
-  This is not local MFA or a self-service password-reset system.
+  Local TOTP adds administrator-granted setup, encrypted seeds, bounded challenges and database-fenced replay counters. Enrolled accounts cannot bypass it; required policy also rejects older unverified local sessions. It is not phishing-resistant MFA or a self-service recovery system. See [MFA coverage](../tests/test_local_mfa.py).
 - [x] **Browser safety.** CSP/external scripts, text rendering, cookie-session CSRF,
   no local/sessionStorage secrets, one-time key display cleanup and stale-response
   guards. SSO-assisted enrollment is opt-in and requires explicit approval;
@@ -140,7 +159,7 @@ universal security guarantees or successful acceptance in an operator's environm
 
 ### Known product boundaries requiring explicit operator acceptance
 
-- No built-in MFA for local passwords; prefer IdP-enforced MFA. No SAML, complete
+- Local TOTP is phishable and has no recovery-code/self-service reset workflow; prefer a phishing-resistant IdP policy. No SAML, complete
   SCIM certification, real-vendor enrollment certification or continuous IdP group
   refresh. Session expiry/cache TTL and revocation windows must fit the threat model.
 - No WORM or cryptographically tamper-evident audit store. Collector checkpoints

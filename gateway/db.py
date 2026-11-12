@@ -216,6 +216,7 @@ class BrowserSession(Base):
     oidc_issuer: Mapped[str | None] = mapped_column(String(512), nullable=True)
     oidc_subject: Mapped[str | None] = mapped_column(String(512), nullable=True)
     oidc_sid: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    mfa_verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 
 class OIDCLogoutReplay(Base):
@@ -341,4 +342,18 @@ class LoginThrottle(Base):
     __tablename__ = "login_throttles"
     bucket: Mapped[str] = mapped_column(String(32), primary_key=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer)
+
+
+class LocalMFA(Base):
+    __tablename__ = "local_mfa"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    seed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_counter: Mapped[int] = mapped_column(BigInteger)
+    grant_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    grant_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    challenge_digest: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    challenge_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pending_seed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    password_binding: Mapped[str | None] = mapped_column(String(64), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer)

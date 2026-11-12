@@ -279,3 +279,60 @@ waits. Overrides are transaction-local and reset before that connection returns 
 the runtime pool, including programmatic migrations. Operators may set bounded
 migration deadlines, but must allow enough time for populated-table index builds.
 Tune against measured contention and database capacity, not just replica count.
+
+## Helm: installation files and local MFA
+
+By default `existingSecret` supplies environment variables. To use the opt-in
+bounded secret-file loader, choose **one mode**, pre-create an immutable versioned
+Kubernetes Secret, and use this values fragment (names only, never commit values):
+
+```yaml
+existingSecret: ''
+mountedSecrets:
+  existingSecret: thunderbolt-installation-v7
+  keys:
+    DATABASE_URL: DATABASE_URL
+    GATEWAY_MASTER_KEY: GATEWAY_MASTER_KEY
+    GATEWAY_SIGNING_KEY: GATEWAY_SIGNING_KEY
+    BOOTSTRAP_TOKEN: BOOTSTRAP_TOKEN
+    METRICS_TOKEN: METRICS_TOKEN
+    # Optional when configured for a confidential OIDC client:
+    # OIDC_CLIENT_SECRET: OIDC_CLIENT_SECRET
+localPassword:
+  enabled: false
+  mfaPolicy: optional
+```
+
+File mode projects only these allowlisted keys to `/run/secrets/thunderbolt`,
+sets corresponding `*_FILE` variables and `GATEWAY_SECRETS_DIR`, and omits
+`envFrom`. All app replicas, the migration hook and optional cleanup job use the
+same configuration, read-only mounts, `0440` files and `fsGroup: 10001`. File
+loader ownership, path and permission validation still applies at startup;
+render tests do not replace acceptance on the target Kubernetes distribution.
+The Secret must exist before installation because migrations are pre-install
+hooks. The chart does not create ExternalSecret resources, contact a secrets
+service or grant new service-account permissions.
+
+`existingSecret` and `mountedSecrets.existingSecret` cannot both be set. File
+mode rejects competing secret names or `*_FILE` entries in `extraEnv`; use the
+mapping rather than bypassing it. Never inject the same secret using another
+environment, dotenv or settings source. Optional OIDC public settings can still
+be supplied with non-secret `extraEnv` entries.
+
+Use immutable, versioned Secret names and roll workloads deliberately. Preserve
+existing database credentials and master/signing key material unless executing a
+separately planned credential/key migration: mounting a new master key does not
+re-encrypt existing provider secrets. Values are loaded at process startup, not
+hot-reloaded or atomically coordinated across replicas. Secret-manager automation
+must respect those constraints.
+
+For explicitly provisioned local users, set `localPassword.enabled: true`.
+`localPassword.mfaPolicy: required` blocks local password-only sign-in until the
+administrator-granted TOTP enrollment is complete. `optional` permits unenrolled
+local users while still challenging enrolled users. Local passwords remain off
+by default; these settings do not change the organization's OIDC MFA policy.
+
+Chart upgrade note: configure local login with `localPassword.enabled` and
+`localPassword.mfaPolicy`; those explicit chart values override any same-named
+entries in an `envFrom` Secret. Move earlier `extraEnv` local-login settings to
+these dedicated values before upgrading. Local login remains disabled by default.

@@ -9,7 +9,7 @@ This is a working foundation under active development, **not** a fully enterpris
 | Virtual credentials | Explicit inference/admin/account/provisioning/team_admin permissions, expiry, revocation, rotation, model scopes and rate allowances | Permissions cannot elevate user role; rotation preserves authorization and expiry |
 | Provider abstraction | OpenAI-compatible, Azure OpenAI v1, Anthropic and native Gemini text adapters | Stateless non-streaming text Responses compatibility; not full vendor API parity; validate supported request types |
 | Spending control | Shared reservations and UTC monthly accounting | Prices operator-maintained; crash reconciliation required; not invoice reconciliation |
-| SSO | OIDC with explicit group mapping and browser sessions | SCIM Users/Groups provisioning subset and explicit offboarding; default-off local passwords and signed back-channel logout; no SAML, local MFA or IdP certification |
+| SSO | OIDC with explicit group mapping and browser sessions | SCIM Users/Groups provisioning subset and explicit offboarding; default-off local passwords and signed back-channel logout; local TOTP option; no SAML or IdP certification |
 | Admin UI and API | Create resources, change budgets/enablement, inspect usage/audit, rotate keys | Member portal manages own existing credentials; delegated team UI supports scoped membership and inference-key administration, not arbitrary custom roles |
 | Local relay | Authenticated loopback forwarding and short-lived access-token renewal; opt-in durable agent-secret rollover | Optional operator-bounded SSO enrollment uses a protected client journal; original expiry remains; no provider-key rotation or claim of RFC 8628 protocol compatibility |
 | Evaluation | Immutable plaintext prompt registry, saved deterministic reports, paired regression gates and opt-in gateway model evaluation CLI | Explicitly saved templates are stored; runner execution can incur provider charges; no LLM judges or quality/safety certification |
@@ -30,6 +30,32 @@ Later database/operations and evaluation-runner increments add composite query i
 
 The ninth increment merged as `0ed13cb`. CI run `43069786191` at head `2f7b8fa` passed all four jobs, including real PostgreSQL, fifteen Chromium cases and twelve Helm tests. This adds explicit multi-team delegation, native Gemini text operations, and opt-in reviewed inbound DLP heuristics. It does not establish full provider API parity or comprehensive sensitive-data detection.
 
+## Latest exact-head acceptance (PR #16)
+
+[CI run 43125212538](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43125212538)
+passed all five jobs at exact head
+`7acaa9848d9c9873678bd0a31750a5a05bb11589`:
+
+- Python: **613 passed, 8 skipped**, with dependency audit reporting no known vulnerabilities.
+- PostgreSQL: **621 passed**, plus successful disposable logical backup/restore,
+  authorization, credential and accounting acceptance.
+- Compose browser: **23 passed**, plus successful two-process shared-budget/rate-limit,
+  SIGKILL uncertainty and survivor/restart acceptance.
+- Actual disposable Keycloak: **2 passed**, using verified TLS and real PKCE,
+  group mapping, CSRF enforcement, local browser logout and signed back-channel logout.
+- Deployment/chart, Terraform, image and monitoring checks passed.
+
+The [official SDK matrix](sdk-compatibility.md) records OpenAI Python 3.49.0
+contracts through the real ASGI gateway with simulated upstream responses.
+The Keycloak checks use an actual IdP rather than mocked authentication state.
+No paid provider calls were used. This does not certify other IdPs, provider
+services, all SDK features, production capacity or deployment security.
+
+**Release status: PR #16 merged as
+`7af1ab65c351cf658ff24226a4339dc4087b512c`.** PR #15 merged as
+`e3b514392c2a798229af2c02889f89a71ad485ee`. Green checks do not imply release
+approval, and later round-17 changes are not covered by this run.
+
 ## Research informing priorities
 
 Reviewed official sources on 2026-11-11. These are capability references, not claims of feature parity, endorsements, copied implementations or promises that every competitor feature is free.
@@ -46,7 +72,7 @@ Reviewed official sources on 2026-11-11. These are capability references, not cl
 2. **Identity lifecycle:** Expand the tested SCIM subset and real IdP compatibility; extend group-change reconciliation and IdP logout integration beyond the implemented delegated administration and explicit multiple memberships. Explicit session revocation already exists.
 3. **Resilience and scale:** Measure pool/lock capacity, exercise circuit breakers under load/chaos, define end-to-end idempotency policy and test regional recovery. Health-aware next-request selection is not safe replay of an ambiguous request.
 4. **Governance:** configurable retention and immutable audit export, data residency, secrets-manager integration, approved guardrail hooks, DLP/redaction and secure plugin boundaries.
-5. **Developer workflows:** Build curated datasets, approval workflows, cost/latency comparisons and an SDK compatibility matrix on the existing prompt versions and offline reports. Paired deterministic gates do not measure general model quality.
+5. **Developer workflows:** Build curated datasets, approval workflows, cost/latency comparisons and broader SDK compatibility coverage beyond the pinned Python acceptance matrix, on the existing prompt versions and offline reports. Paired deterministic gates do not measure general model quality.
 6. **Optional optimization:** tenant-isolated caching with privacy policy, batching, weighted routing and multimodal/vendor-specific endpoints. Cache semantics and data isolation must precede cache hit-rate claims.
 
 See [architecture](architecture.md), [security](security.md), [evaluation](evaluation.md) and [relay](local-relay.md) for operational details and exclusions.

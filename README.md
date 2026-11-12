@@ -14,7 +14,7 @@ Apache-2.0 LLM gateway with a stateless application tier and external SQL policy
 - Hashed API credentials with explicit inference/admin/account/provisioning/team_admin permissions, expiration and revocation; rotation preserves scope and expiry.
 - OIDC SSO with PKCE, verified identity tokens, nested group mappings, bounded metadata/JWKS caching, configurable sessions and CSRF protection; explicit identity linking and session revocation.
 - A bounded SCIM Users/Groups subset, signed OIDC back-channel logout, administrator console and member self-service portal.
-- Default-off administrator-provisioned local password fallback with shared throttles and scoped session revocation.
+- Default-off administrator-provisioned local password fallback with shared throttles, optional/required TOTP and scoped session revocation.
 - Privileged mutations revalidate authority under the shared writer lock; opt-in generated-output safeguards preserve provider billing and fail closed on unsupported content.
 - Immutable prompt versions, literal variable previews and saved deterministic offline evaluations, without paid evaluation model calls.
 - Metadata audit/usage records, signed-cursor exports, request correlation, protected Prometheus metrics and example dashboards/alerts.
@@ -64,7 +64,8 @@ uv run ruff check .
 - [Official Python SDK acceptance](docs/sdk-compatibility.md)
 - [Internal security and operational readiness](docs/security-readiness.md)
 - [SCIM provisioning subset](docs/provisioning.md)
-- [Optional local password fallback](docs/local-passwords.md)
+- [Optional local passwords and TOTP MFA](docs/local-passwords.md)
+- [Mounted secret files](docs/secret-files.md)
 - [Multi-team delegation and team administration](docs/team-delegation.md)
 - [Opt-in inbound DLP and source extension boundaries](docs/guardrails.md)
 - [Operational cleanup and recovery](docs/operations.md)
@@ -83,7 +84,7 @@ uv run ruff check .
 
 Budgets are admission controls using conservative reservations and provider-reported usage, **not a contractual hard billing cap**. Configure accurate prices and upstream account limits. Interrupted/unknown outcomes remain conservatively charged; reconcile only after checking provider billing. Token admission is estimated. Inference uses shared coordination and deterministic team/user/key row locks; unrelated teams can proceed concurrently. Same-team budget admission still serializes and must be benchmarked before scaling. No automatic retries after dispatch, to avoid duplicate billing. The shared circuit breaker skips unhealthy routes for later requests; it never replays an already-dispatched request. Equivalent models, prices and data-handling policy on fallback providers must be configured by an administrator.
 
-OIDC groups are refreshed on login, not continuously. Session lifetime is configurable from five minutes to 24 hours (default eight hours); disable a user for immediate gateway access revocation. Already-admitted provider work is not canceled by revocation. No local MFA, SAML, full SCIM interoperability certification, RFC 8628 device authorization, credential-vault rotation, arbitrary plugin execution, multimodal adapter, distributed cache, semantic routing, or LLM-as-judge evaluation is claimed. The relay renews short-lived gateway tokens. Opt-in durable agent-secret rotation requires a protected local journal and remains subject to the original credential expiry; it does not rotate provider keys or eliminate initial provisioning. Environment-only relay operation retains manual agent-secret rollover. Gateway replicas stay stateless, but opting into the relay journal deliberately adds protected client-side state.
+OIDC groups are refreshed on login, not continuously. Session lifetime is configurable from five minutes to 24 hours (default eight hours); disable a user for immediate gateway access revocation. Already-admitted provider work is not canceled by revocation. Local TOTP is phishable; no phishing-resistant local MFA, SAML, full SCIM interoperability certification, RFC 8628 device authorization, credential-vault rotation, arbitrary plugin execution, multimodal adapter, distributed cache, semantic routing, or LLM-as-judge evaluation is claimed. The relay renews short-lived gateway tokens. Opt-in durable agent-secret rotation requires a protected local journal and remains subject to the original credential expiry; it does not rotate provider keys or eliminate initial provisioning. Environment-only relay operation retains manual agent-secret rollover. Gateway replicas stay stateless, but opting into the relay journal deliberately adds protected client-side state.
 
 Schema changes use serialized versioned migrations. Databases created by the initial release require an explicit, validated `--adopt-v1` step after backup; see the migration guide. HA app replicas do not create an HA database. External TLS, database HA/backups, secret management, egress controls, billing/audit archival, load/chaos tests, and an independent security review remain operator requirements. Dependency versions are recorded in `uv.lock`; container runtime packages use hashed `requirements.lock`.
 

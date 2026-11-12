@@ -72,8 +72,16 @@ than consuming unlimited memory. Per-replica concurrency limits are resource con
 not a replacement for distributed throttling or ingress abuse protections.
 
 Administrator reset/revoke invalidates the user's browser sessions, not independent
-API keys or agent credentials. Local authentication does not provide MFA, compromised
-password screening, a first-login change requirement or self-service email recovery.
+API keys or agent credentials. Optional or operator-required local TOTP is available.
+Enrolled factors are never bypassed by optional policy; required policy denies existing
+password-only local sessions at authorization, while OIDC relies on IdP assurance.
+Single-use setup grants require administrator authorization and a fresh password;
+activation requires a valid TOTP. Shared transactions fence challenge consumption and
+accepted counters. Factor reset removes the local password and all sessions, requiring
+fresh provisioning. Seeds are master-key encrypted and preflight-checked. This remains
+phishable OTP, not hardware MFA; no recovery codes or remembered-device bypass exist.
+Local authentication does not provide compromised password screening, a first-login
+change requirement or self-service email recovery.
 Do not claim equivalent protection to an MFA-enforced IdP. See [local passwords](local-passwords.md).
 
 ## Signed IdP back-channel logout

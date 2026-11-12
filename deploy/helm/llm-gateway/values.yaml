@@ -9,6 +9,18 @@ imagePullSecrets: []
 nameOverride: ''
 fullnameOverride: ''
 existingSecret: '' # Required: DATABASE_URL, GATEWAY_MASTER_KEY, GATEWAY_SIGNING_KEY, BOOTSTRAP_TOKEN, METRICS_TOKEN.
+# File mode: set existingSecret to '' and mountedSecrets.existingSecret to a versioned Secret.
+mountedSecrets:
+  existingSecret: ''
+  keys:
+    DATABASE_URL: DATABASE_URL
+    GATEWAY_MASTER_KEY: GATEWAY_MASTER_KEY
+    GATEWAY_SIGNING_KEY: GATEWAY_SIGNING_KEY
+    BOOTSTRAP_TOKEN: BOOTSTRAP_TOKEN
+    METRICS_TOKEN: METRICS_TOKEN
+localPassword:
+  enabled: false
+  mfaPolicy: optional # Set required when all local users must enroll before sign-in.
 environment: production
 publicUrl: https://gateway.example.com
 providerTimeoutSeconds: 120 # Per-read/connect request timeout; not total stream duration.

@@ -100,7 +100,7 @@ async def throttle(email, ip):
 
 @router.get("/auth/local/options")
 async def options():
-    return {"enabled": get_settings().local_password_enabled}
+    return {"enabled": get_settings().local_password_enabled, "mfa_policy": get_settings().local_mfa_policy}
 
 
 @router.put("/admin/api/users/{user_id}/password", status_code=204)
@@ -119,6 +119,11 @@ async def provision(user_id: str, body: PasswordBody, identity: Identity = Depen
             row.password_hash = encoded
         else:
             s.add(db.LocalPassword(user_id=user_id, password_hash=encoded))
+        factor = await s.get(db.LocalMFA, user_id)
+        if factor:
+            factor.grant_digest, factor.grant_expires = None, None
+            factor.challenge_digest, factor.challenge_expires = None, None
+            factor.pending_seed, factor.password_binding = None, None
         await s.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user_id))
         await db.audit(s, identity.user.id, "local_password.reset", user_id)
 
@@ -129,6 +134,11 @@ async def revoke(user_id: str, identity: Identity = Depends(admin)):
     async with db.transaction() as s:
         await revalidate_admin(s, identity)
         await s.execute(delete(db.LocalPassword).where(db.LocalPassword.user_id == user_id))
+        factor = await s.get(db.LocalMFA, user_id)
+        if factor:
+            factor.grant_digest, factor.grant_expires = None, None
+            factor.challenge_digest, factor.challenge_expires = None, None
+            factor.pending_seed, factor.password_binding = None, None
         await s.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user_id))
         await db.audit(s, identity.user.id, "local_password.revoke", user_id)
 
@@ -150,7 +160,6 @@ async def login(body: LoginBody, request: Request):
         encoded = row.password_hash if row else None
         user_id = user.id if user else None
     valid = await derive(verify, body.password.get_secret_value(), encoded)
-    raw, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     async with db.transaction() as s:
         user = await s.get(db.User, user_id) if user_id else None
         row = await s.get(db.LocalPassword, user_id) if user_id else None
@@ -158,13 +167,26 @@ async def login(body: LoginBody, request: Request):
                 or user.scim_managed or user.oidc_subject or user.scim_external_id
                 or not await db.active_membership(s, user, user.team_id)):
             raise HTTPException(401, "Invalid credentials")
-        old = request.cookies.get("gateway_session")
-        if old:
-            await s.execute(delete(db.BrowserSession).where(db.BrowserSession.digest == digest(old)))
-        s.add(db.BrowserSession(digest=digest(raw), user_id=user.id, csrf=csrf,
-                               expires_at=db.now() + timedelta(seconds=cfg.local_session_seconds)))
-        await db.audit(s, user.id, "local_password.login")
-        target = "/admin" if user.role == "admin" else "/portal"
+        from .local_mfa import challenge
+        factor = await s.get(db.LocalMFA, user.id)
+        if factor and factor.seed:
+            token = challenge(factor, encoded)
+            return {"mfa_required": True, "challenge": token, "expires_in": 300}
+        if cfg.local_mfa_policy == "required":
+            raise HTTPException(403, "MFA enrollment required")
+        return await issue_session(s, user, request)
+
+
+async def issue_session(s, user, request, mfa=False):
+    cfg = get_settings()
+    raw, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+    old = request.cookies.get("gateway_session")
+    if old:
+        await s.execute(delete(db.BrowserSession).where(db.BrowserSession.digest == digest(old)))
+    s.add(db.BrowserSession(digest=digest(raw), user_id=user.id, csrf=csrf,
+                           expires_at=db.now() + timedelta(seconds=cfg.local_session_seconds), mfa_verified=mfa))
+    await db.audit(s, user.id, "local_password.login")
+    target = "/admin" if user.role == "admin" else "/portal"
     response = JSONResponse({"redirect": target})
     response.set_cookie("gateway_session", raw, httponly=True, secure=cfg.public_url.startswith("https://"),
                         samesite="lax", max_age=cfg.local_session_seconds, path="/")

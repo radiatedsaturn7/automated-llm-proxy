@@ -72,3 +72,14 @@ appropriate regression test. Only add a targeted exception after documenting
 why the flagged behavior is safe. Review scanner upgrades deliberately and rerun
 both the gate and unfiltered scan. Pinned dependencies improve repeatability;
 they do not auto-update for newly disclosed scanner vulnerabilities.
+
+## Container component diagnostic exceptions
+
+`tools/security/image_components.py` adds precise B404/B603 exceptions for
+read-only final-image diagnosis. The only executable is Perl resolved from the
+image's trusted PATH, modules are checked against two literals before invocation,
+argv uses no shell, no user document/archive is parsed, and timeout is ten seconds.
+Tests reject unknown modules, assert exact argv/timeout, and distinguish missing
+modules from unexpected failures. This script runs offline in a read-only
+disposable image, not on application requests. These are SAST data-flow exceptions,
+not CVE or image-scanner suppressions; unfiltered Bandit output retains both.

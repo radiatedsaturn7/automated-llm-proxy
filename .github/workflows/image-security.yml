@@ -62,6 +62,7 @@ jobs:
                          'recorded_at':datetime.now(timezone.utc).isoformat()}, f, indent=2)
           PY
       - name: Build disposable image without credentials or publication
+        id: image-build
         run: |
           docker build --pull --iidfile evidence/image-id.txt -t brrrtgate:security-scan .
           docker image inspect --format '{{json .Id}}' brrrtgate:security-scan > evidence/image-config-digest.json
@@ -101,6 +102,12 @@ jobs:
           GRYPE_DB_AUTO_UPDATE: 'false'
         run: |
           grype sbom:evidence/sbom.syft.json --fail-on high -o json --file evidence/grype.json
+      - name: Inspect final runtime components without network or writable image
+        if: ${{ !cancelled() && steps.image-build.outcome == 'success' }}
+        run: |
+          docker run --rm --network none --read-only \
+            --mount type=bind,src="$PWD/tools/security/image_components.py",dst=/image_components.py,readonly \
+            --entrypoint python brrrtgate:security-scan /image_components.py > evidence/runtime-components.json
       - name: Preserve available evidence even when the gate fails
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

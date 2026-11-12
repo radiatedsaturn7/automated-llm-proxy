@@ -48,3 +48,15 @@ not add secrets, real datasets or local credential files to the build context.
 
 See [dated image triage](image-vulnerability-triage.md). The gate remains blocking;
 upstream no-DSA decisions are not blanket exceptions.
+
+## Component-level diagnostic evidence
+
+`runtime-components.json` records exact final-image nonroot identity, selected
+process security flags, affected CLI presence/mode, default Perl module lookup,
+SQLite compile options/basic CRUD, and native dependency imports. The diagnostic
+runs with no network and a read-only image; its source is bind-mounted read-only.
+It neither changes the image nor evaluates attacker-supplied exploit inputs.
+Unexpected probe/import/SQLite failures fail the workflow. Missing Perl modules
+are explicit observations, not automatic CVE exemptions. The same unfiltered
+High/Critical image gate still runs. Runtime flags describe this CI invocation,
+not all possible operator deployments.

@@ -213,6 +213,8 @@ async def rotate_key(key_id: str, identity: Identity = Depends(admin)):
         key.revoked = True
         s.add(replacement)
         await s.flush()
+        from .policy import inherit_rotation_allowance
+        await inherit_rotation_allowance(s, key, replacement)
         await db.audit(s, identity.user.id, "key.rotate", key.id, replacement_id=replacement.id)
         return {**record(replacement), "key": raw}
 

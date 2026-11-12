@@ -154,6 +154,8 @@ async def rotate(team_id: str, key_id: str, identity: Identity = Depends(caller)
         key.revoked = True
         s.add(replacement)
         await s.flush()
+        from .policy import inherit_rotation_allowance
+        await inherit_rotation_allowance(s, key, replacement)
         await db.audit(s, identity.user.id, "team.key.rotate", key.id, replacement_id=replacement.id)
         return {**record(replacement), "key": raw}
 

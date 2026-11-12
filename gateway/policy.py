@@ -95,6 +95,21 @@ async def reserve(identity, amount, tokens, model, *, selected_provider=None):
         return reservation.id
 
 
+async def inherit_rotation_allowance(session, previous, replacement):
+    """Carry consumed allowance under the caller's exclusive policy writer gate.
+
+    Both key IDs must already exist in this transaction. Admission holds the
+    shared gate, so no old-key admission can race this copy and revocation.
+    Copy only the current shared-DB minute: prior windows must not penalize the
+    replacement, and a boundary crossed after this sample starts a fresh window.
+    """
+    minute = (await db.database_now(session)).strftime("%Y%m%d%H%M")
+    bucket = await session.get(db.RateBucket, previous.id + ":" + minute)
+    if bucket is not None:
+        session.add(db.RateBucket(id=replacement.id + ":" + minute,
+                                 requests=bucket.requests, tokens=bucket.tokens))
+
+
 async def finalize(reservation_id, model, provider_id, route, usage=None, release=False):
     async with db.transaction(inference=True) as s:
         reservation = await s.get(db.Reservation, reservation_id)

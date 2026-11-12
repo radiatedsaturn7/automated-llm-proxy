@@ -19,6 +19,9 @@ spec:
   template:
     metadata:
       labels: {{- include "gateway.selectorLabels" . | nindent 8 }}
+        {{- if .Values.azureWorkloadIdentity.enabled }}
+        azure.workload.identity/use: "true"
+        {{- end }}
     spec:
       serviceAccountName: {{ include "gateway.serviceAccountName" . }}
       automountServiceAccountToken: false

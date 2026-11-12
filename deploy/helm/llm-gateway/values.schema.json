@@ -419,6 +419,46 @@
       "type": "integer",
       "minimum": 31,
       "maximum": 4000
+    },
+    "azureWorkloadIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "allowedEndpoints"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "allowedEndpoints": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.openai\\.azure\\.com/openai/v1$"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "allowedEndpoints": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "allOf": [

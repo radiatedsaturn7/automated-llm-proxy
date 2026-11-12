@@ -337,6 +337,8 @@ async def test_v17_preserves_existing_credentials_as_admin_origin(migration_engi
                 break
             await connection.run_sync(revision.upgrade)
             await connection.execute(versions.insert().values(version=number, applied_at=datetime.now(timezone.utc)))
+        await connection.execute(v0016.metadata.tables['users'].insert().values(
+            id='original-user', email='original@example.test', role='member', enabled=True, scim_managed=False))
         await connection.execute(v0016.metadata.tables['api_keys'].insert().values(
             id='original', user_id='original-user', name='original', digest='digest', prefix='prefix',
             kind='api', permissions=['inference'], allowed_models=['chat'], rpm=10,tpm=100,

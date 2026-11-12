@@ -39,7 +39,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- fail "Use either existingSecret or mountedSecrets.existingSecret, not both" -}}
 {{- end -}}
 {{- range .Values.extraEnv -}}
-{{- if or (eq .name "LOCAL_PASSWORD_ENABLED") (eq .name "LOCAL_MFA_POLICY") (eq .name "GATEWAY_SECRETS_DIR") (eq .name "SHUTDOWN_GRACE_SECONDS") -}}
+{{- if or (eq .name "LOCAL_PASSWORD_ENABLED") (eq .name "LOCAL_MFA_POLICY") (eq .name "GATEWAY_SECRETS_DIR") (eq .name "SHUTDOWN_GRACE_SECONDS") (eq .name "AZURE_WORKLOAD_IDENTITY_ENABLED") (eq .name "AZURE_WORKLOAD_IDENTITY_ALLOWED_ENDPOINTS") -}}
 {{- fail "Use dedicated chart settings rather than duplicate extraEnv configuration" -}}
 {{- end -}}
 {{- if $mounted -}}
@@ -66,6 +66,10 @@ env:
     value: {{ .Values.localPassword.enabled | quote }}
   - name: LOCAL_MFA_POLICY
     value: {{ .Values.localPassword.mfaPolicy | quote }}
+  - name: AZURE_WORKLOAD_IDENTITY_ENABLED
+    value: {{ .Values.azureWorkloadIdentity.enabled | quote }}
+  - name: AZURE_WORKLOAD_IDENTITY_ALLOWED_ENDPOINTS
+    value: {{ .Values.azureWorkloadIdentity.allowedEndpoints | toJson | quote }}
   - name: ENVIRONMENT
     value: {{ .Values.environment | quote }}
   - name: PUBLIC_URL

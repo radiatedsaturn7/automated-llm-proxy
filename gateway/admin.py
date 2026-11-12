@@ -131,10 +131,13 @@ async def patch_user(user_id: str, body: schemas.UserPatch, identity: Identity =
 async def create_provider(body: schemas.ProviderCreate, identity: Identity = Depends(admin)):
     from .providers import validate_base_url
     await validate_base_url(body.base_url)
+    if body.kind == "azure_openai_workload_identity":
+        from .azure_identity import check_endpoint
+        check_endpoint(body.base_url)
     async with db.transaction() as s:
         await revalidate_admin(s, identity)
         provider = db.Provider(name=body.name, kind=body.kind, base_url=body.base_url.rstrip("/"),
-                               encrypted_key=encrypt(body.api_key), models=body.model_dump(mode="json")["models"],
+                               encrypted_key=encrypt(body.api_key or ""), models=body.model_dump(mode="json")["models"],
                                enabled=body.enabled, priority=body.priority)
         s.add(provider)
         await s.flush()
@@ -151,6 +154,8 @@ async def patch_provider(provider_id: str, body: schemas.ProviderPatch, identity
             raise HTTPException(404, "Provider not found")
         if body.enabled is not None:
             provider.enabled = body.enabled
+        if body.api_key and provider.kind == "azure_openai_workload_identity":
+            raise HTTPException(400, "Workload identity does not accept an API key")
         if body.api_key:
             provider.encrypted_key = encrypt(body.api_key)
         if body.models is not None:

@@ -46,12 +46,21 @@ class ModelRoute(Strict):
 
 class ProviderCreate(Strict):
     name: str = Field(min_length=1, max_length=120)
-    kind: Literal["openai", "anthropic", "azure_openai", "gemini", "bedrock_converse"] = "openai"
+    kind: Literal["openai", "anthropic", "azure_openai", "gemini", "bedrock_converse", "azure_openai_workload_identity"] = "openai"
     base_url: str = Field(max_length=2048)
-    api_key: str = Field(min_length=1, max_length=8192)
+    api_key: str | None = Field(default=None, min_length=1, max_length=8192)
     models: dict[str, ModelRoute]
     enabled: bool = True
     priority: int = Field(default=0, ge=0, le=1000)
+
+    @model_validator(mode="after")
+    def credentials_valid(self):
+        if self.kind == "azure_openai_workload_identity":
+            if self.api_key is not None:
+                raise ValueError("Workload identity does not accept an API key")
+        elif self.api_key is None:
+            raise ValueError("This provider requires an API key")
+        return self
 
     @field_validator("models")
     @classmethod

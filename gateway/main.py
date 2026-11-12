@@ -24,28 +24,36 @@ from .migrate import HEAD, versions
 
 @asynccontextmanager
 async def lifespan(app):
+    from .azure_identity import create_credential, close_credential
     cfg = get_settings()
-    if db.engine is None:
-        db.init_engine()
-    app.state.upstream = httpx.AsyncClient(timeout=httpx.Timeout(cfg.provider_timeout_seconds, connect=10),
-        limits=httpx.Limits(max_connections=200, max_keepalive_connections=50), follow_redirects=False, trust_env=False)
+    # Credential configuration can fail fast. Do it before allocating HTTP/DB
+    # resources, then unwind any partial startup as well as normal shutdown.
+    app.state.azure_workload_credential = create_credential(cfg)
+    upstream = None
     app.state.accounting_tasks = set()
     if not hasattr(app.state, "active_requests"):
         app.state.active_requests = set()
-    yield
-    # Uvicorn starts lifespan shutdown immediately after cancelling timed-out
-    # requests. Their wait_for children may still be unwinding before scheduling
-    # settlement. Retain request tasks until that cleanup has actually finished.
-    while app.state.active_requests:
-        await asyncio.gather(*list(app.state.active_requests), return_exceptions=True)
-    # Finishing a watchdog can spawn a settlement task. Drain every generation
-    # before disposing the upstream client/database, not just the first snapshot.
-    while app.state.accounting_tasks:
-        snapshot = list(app.state.accounting_tasks)
-        await asyncio.gather(*snapshot, return_exceptions=True)
-        app.state.accounting_tasks.difference_update(snapshot)
-    await app.state.upstream.aclose()
-    await db.engine.dispose()
+    try:
+        if db.engine is None:
+            db.init_engine()
+        upstream = httpx.AsyncClient(timeout=httpx.Timeout(cfg.provider_timeout_seconds, connect=10),
+            limits=httpx.Limits(max_connections=200, max_keepalive_connections=50), follow_redirects=False, trust_env=False)
+        app.state.upstream = upstream
+        yield
+    finally:
+        # Uvicorn starts lifespan shutdown immediately after cancelling timed-out
+        # requests. Wait for their settlement scheduling before disposal.
+        while app.state.active_requests:
+            await asyncio.gather(*list(app.state.active_requests), return_exceptions=True)
+        while app.state.accounting_tasks:
+            snapshot = list(app.state.accounting_tasks)
+            await asyncio.gather(*snapshot, return_exceptions=True)
+            app.state.accounting_tasks.difference_update(snapshot)
+        await close_credential(app)
+        if upstream is not None:
+            await app.state.upstream.aclose()
+        if db.engine is not None:
+            await db.engine.dispose()
 
 
 class RequestDrainMiddleware:

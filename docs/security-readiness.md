@@ -6,9 +6,13 @@ by this checklist. Owners should record a deployment-specific decision, exact
 commit/image digest, configuration, test run links, remaining risks and rollback
 plan before admitting sensitive traffic.
 
-## Evidence checkpoint
+## Evidence checkpoints
 
-Latest verified checkpoint: PR #21 at exact head
+See the [current exact-head evidence ledger](release-evidence.md) for subsequent
+verified increments and their CI runs. The detailed record below is historical,
+not the current release head.
+
+Historical checkpoint: PR #21 at exact head
 `983572428fa11fb59a8da2b74a0995d6cbc0ae6d`, merged as
 `46f071c526f4e4e38168dfea40cc083438e11164`.
 [CI run 43135584872](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43135584872)

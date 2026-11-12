@@ -20,7 +20,7 @@ The project display name is now **Brrrtgate**. Existing installation identifiers
 - Privileged mutations revalidate authority under the shared writer lock; opt-in generated-output safeguards preserve provider billing and fail closed on unsupported content.
 - Immutable prompt versions, literal variable previews and saved deterministic offline evaluations, without paid evaluation model calls.
 - Metadata audit/usage records, signed-cursor exports, request correlation, protected Prometheus metrics and example dashboards/alerts.
-- Docker Compose, Helm/HA settings, Terraform Helm deployment, serialized migrations and CI checks.
+- Docker Compose, Helm/HA settings, Terraform Helm deployment, and a [native Linux VM/systemd kit](docs/systemd-deployment.md), with explicit migrations and CI checks.
 
 Also implemented: shared per-model provider circuit breakers, opt-in SSO-assisted relay enrollment and journaled agent-secret rollover, bounded browser export downloads and paired offline regression gates. See the [feature matrix](docs/feature-matrix.md) for verification evidence and limitations.
 

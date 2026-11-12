@@ -25,6 +25,7 @@ class Base(DeclarativeBase):
 
 class PolicyLock(Base):
     __tablename__ = "policy_lock"
+    master_key_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
 
 
@@ -308,6 +309,10 @@ async def transaction(*, inference=False):
                 locked = await session.scalar(select(PolicyLock.id).where(PolicyLock.id == 1).with_for_update(read=inference))
                 if locked != 1:
                     raise SQLAlchemyError("Policy lock missing; run schema migration")
+            from .encryption import matches
+            active = await session.scalar(select(PolicyLock.master_key_fingerprint).where(PolicyLock.id == 1))
+            if not matches(active):
+                raise SQLAlchemyError("Installation encryption key does not match database")
             yield session
 
 

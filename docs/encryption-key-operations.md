@@ -1,93 +1,99 @@
-# Encryption-key operations and recovery
+# Maintenance-window master-key rotation
 
-## Current support and limits
+This release supports an explicit, transactional rotation of **database encryption**
+keys. It does not rotate `GATEWAY_SIGNING_KEY`, promise zero downtime, or fence old
+binaries/direct SQL writers. Use a maintenance window and remove those writers first.
 
-Thunderbolt currently accepts **one** `GATEWAY_MASTER_KEY`, a Fernet key. It encrypts
-provider credentials and local MFA seeds, including pending enrollment seeds.
-There is no supported keyring, online key rotation, or bulk re-encryption command.
-Changing this setting does not migrate stored ciphertext. Existing credentials and
-MFA factors can become unreadable, even when the server process starts successfully.
+## Configuration and initialization
 
-Mounted secret files change how key material is delivered, not its lifecycle. Keep
-the same bytes when moving from environment variables to mounted files. Use an
-immutable/versioned secret per rollout; different files read during startup are not
-necessarily from one atomic secret generation. See [mounted secrets](secret-files.md).
+`GATEWAY_MASTER_KEY` is the sole encryption primary. Optional
+`GATEWAY_MASTER_DECRYPT_KEYS` is a JSON array of at most three distinct additional
+Fernet keys, used only for decryption. Duplicate decoded key material, including the
+primary, is rejected. Its `_FILE` selector uses the same trusted mount policy as other
+[installation secrets](secret-files.md). No key is accepted on the CLI command line.
 
-Do not replace the master key in a live deployment, run a blind SQL update, or remove
-an old key merely because a new deployment appears healthy. A stale replica can still
-write ciphertext using its old key. This release has no database encryption-generation
-fence that prevents that behavior.
+Migration v13 verifies every non-null provider credential and enrolled/pending MFA seed
+using the **primary alone**, then records a domain-separated fingerprint of its decoded
+key material. Wrong-key initialization fails even if a fallback could decrypt the data.
+Fresh empty databases initialize through the same migration command. Re-running migration
+never resets the fingerprint. Apply v13 with the existing primary before planning rotation.
 
-## Backup escrow
+Supported application transactions check the fingerprint under the policy gate. A
+replica with an old primary fails readiness and policy operations with 503 after rotation.
+Fallbacks do not bypass that fence. This does not cancel already admitted work, prevent
+old application versions from writing, or protect against direct database changes.
 
-Protect the database backup and its corresponding master key as a recoverable pair.
-Store key material separately from the database backup, under restricted, audited
-access with a tested recovery procedure. Preserve keys required by retained historical
-backups. Deleting a key can make otherwise valid backups unusable.
+## Required operator sequence
 
-Also retain the installation's signing key and the application version/schema context.
-Do not put installation secrets in Git, tickets, command arguments, exported reports,
-or unprotected backup manifests. Metadata identifying a protected key version is useful;
-the key bytes themselves are not ordinary backup metadata.
+1. Back up the database and securely escrow its matching master and signing keys.
+   Verify an isolated restore with a compatible release. Keep historical keys for all
+   retained backups. Never place keys in Git, tickets, arguments, or reports.
+2. Drain traffic and in-flight requests, suspend jobs, and stop all database writers.
+   Remove older binaries. Removing ingress alone is insufficient. Deploy the current
+   version and migrate v13 with the original primary before this rotation procedure.
+3. Prepare immutable/versioned secrets for the target configuration: new primary plus
+   the previous key in the decrypt-only list. Keep the signing key unchanged. Multiple
+   mounted files are not read as one atomic generation; do not mutate them mid-startup.
+4. Obtain the current fingerprint with `python -m gateway.rotate_master --inspect`.
+   This bounded read-only operation verifies the schema and reports `database_fingerprint`,
+   `configured_fingerprint`, and `primary_matches`, even when the configured primary
+   differs. It does **not** decrypt or verify ciphertext; `ok: true` only means inspection
+   succeeded, not that the primary matches. It cannot be combined with `--execute` or
+   `--expected-current-fingerprint`. A fingerprint is not a key, but must correspond to
+   the intended installation. Configure a one-off operator process
+   with the target primary and old decrypt key, then run the dry run:
 
-Test restores in an isolated environment with no outbound provider access or public
-traffic. Use matching protected secrets and a compatible application/schema version.
-Run the existing local preflight:
+   ```sh
+   python -m gateway.rotate_master --expected-current-fingerprint "$CURRENT_FINGERPRINT"
+   ```
 
-```sh
-python -m gateway.check
-```
+5. Review the result. The command verifies schema, expected fingerprint, and all stored
+   encrypted fields. Defaults cap processing at 100,000 rows and 300 seconds; use
+   `--max-rows` (1..1,000,000) and `--timeout-seconds` (1..3600) to set reviewed bounds.
+   Lock waits and database statement limits can also terminate the operation. No network
+   provider requests occur. Execution requires repeating the command with `--execute`.
+6. Execution holds the exclusive database policy gate and changes all relevant ciphertext
+   and the fingerprint in **one transaction**. A bad ciphertext, invalid MFA seed, row
+   bound, or cancellation aborts the transaction. Success emits only counts, execution
+   status and the target fingerprint. Already-primary ciphertext is verified without
+   being rewritten; repeat execution with its current fingerprint is safe.
+7. Restart every replica/job with the target configuration; run `python -m gateway.check`
+   and verify readiness and representative workflows before restoring traffic. Confirm
+   the primary on every deployment. Keep old key material in protected backup escrow.
 
-This checks configuration, schema, provider credential decryption, and MFA seed
-readability. It does not verify upstream credentials, IdP access, every operational
-workflow, or that other replicas have the same key. It is not a rotation command.
+An interrupted command can have an uncertain commit outcome (for example, a connection
+loss during commit). Run `python -m gateway.rotate_master --inspect` to observe the stored fingerprint, and rerun a dry run with the observed
+expected fingerprint; do not assume failure output proves rollback after a lost commit
+acknowledgment. No automatic retry is performed. Re-running execution with the same target
+primary verifies and converges remaining old ciphertext without changing logical secrets.
 
-## Planning a change
+The CLI's atomic gate can block application work, which is another reason to drain first.
+This is not a background or scheduled rotation service, and it does not orchestrate your
+replicas, secrets manager, ingress, backups, or incident response.
 
-A master-key change requires a separately reviewed and tested migration procedure;
-this release does not supply one. Budget for a maintenance outage rather than assuming
-rolling deployment is safe. Before approving such a procedure:
+## Retirement, rollback and backups
 
-1. Inventory all gateway replicas, maintenance jobs, administrative clients, and other
-   database writers, plus their application and secret versions.
-2. Verify an isolated restore of a recent backup with the current key. Preserve that
-   backup and its protected key material through the change and rollback period.
-3. Define how traffic will be drained, in-flight work allowed to finish, jobs suspended,
-   and all writers stopped. Removing public ingress alone does not stop writers.
-4. Require a tested migration covering provider credentials and **both** enrolled and
-   pending MFA seeds, transactional failure behavior, and recovery after interruption.
-5. Define verification of every replica before traffic reopens, a check for ciphertext
-   still requiring the previous key, and an explicit rollback procedure. Changing an
-   environment variable back is not sufficient once ciphertext has been rewritten.
+After all writers are demonstrably using the new primary, run a full dry run with **no
+fallbacks** to prove current stored ciphertext is decryptable by that primary alone.
+Check every replica before removing runtime fallbacks. This verifies current data, not
+historical backups. Retain protected old keys while those backups remain in retention.
 
-Until that procedure exists, keep the current key stable. For an existing deployment,
-contact the maintainer/operator responsible for migration design rather than attempting
-an undocumented conversion. A fresh empty installation can use a newly generated key;
-it cannot thereby read data from the previous installation.
+Rollback is explicit reverse rotation during another drained maintenance window: configure
+the old key as primary and the new one as fallback, supply the current new fingerprint,
+perform dry run, then execute. Restart all replicas with the restored primary. Merely
+changing an environment variable back fails the fence and does not rewrite ciphertext.
+Schema downgrade is unsupported; restore a verified backup with its matching application
+release and secrets when a full rollback is required.
 
-## Signing keys are different
+## Signing keys and compromise
 
-`GATEWAY_SIGNING_KEY` is not the master encryption key. Besides JWT and cursor signing,
-it participates in stored credential/session-related digests. Replacing it can invalidate
-sessions and cursors and make existing API or agent credentials unrecognizable. This
-release does not provide a signing-key rotation/overlap migration either. Do not rotate
-it as a substitute for master-key rotation, or expect retaining the master key alone
-to restore authentication continuity.
+`GATEWAY_SIGNING_KEY` also participates in stored credential/session-related digests as
+well as JWT and cursor signing. Replacing it can invalidate authentication and make
+existing credentials unrecognizable. This tooling deliberately does not change it and
+provides no signing-key overlap migration.
 
-## Suspected compromise
-
-Treat suspected key exposure as an incident. Contain access, preserve evidence, identify
-which database snapshots and encrypted secrets were accessible, and involve the security
-owner. Re-encrypting data would not undo exposure of an earlier snapshot. Provider
-credentials may require revocation/replacement at their issuing services; exposed MFA
-seeds may require factor reset and secure re-enrollment. Installation signing-key exposure
-has separate authentication consequences. Scope those actions explicitly and plan for
-interruption; do not publish secrets while coordinating recovery.
-
-## Future design, not available functionality
-
-A potential future implementation would combine a bounded decrypt-only fallback keyring,
-a primary-encryption-key fingerprint stored in the database, admission/write fencing for
-stale supported replicas, and an atomic, dry-run-first re-encryption tool. Even that design
-would require removing older binaries and controlling out-of-band database writers.
-None of these rotation mechanisms is implemented or promised by this document.
+Suspected exposure requires incident containment, evidence preservation and review of
+accessible snapshots. Re-encryption does not undo prior disclosure: provider credentials
+may need revocation/replacement at their issuing services, and exposed MFA seeds may
+require secure factor re-enrollment. Coordinate those actions separately. This tooling
+is not a substitute for incident response or an external security assessment.

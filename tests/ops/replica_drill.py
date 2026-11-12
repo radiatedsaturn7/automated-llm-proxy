@@ -31,9 +31,9 @@ def require_disposable():
         raise ValueError('Disposable installation credentials required')
 
 
-def docker(*args, input=None):
+def docker(*args, input=None, env=None):
     result = subprocess.run(['docker', *args], input=input, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, check=False, timeout=180)
+                            stderr=subprocess.PIPE, check=False, timeout=180, env=env)
     if result.returncode:
         raise RuntimeError('Disposable container command failed')
     return result.stdout.decode()
@@ -201,6 +201,9 @@ def run():
         'replayed_upstream_requests': 0, 'surviving_and_recovered': summary(healthy)}
     report['accounting'] = {'settled_requests': len(usage), 'pending_requests': 1, 'settled_micros': sum(r['cost_micros'] for r in usage)}
     report['resources_after_recovery'] = resources()
+    STAGE = 'offline_master_key_rotation'
+    from rotation_drill import run_rotation
+    report['master_key_rotation'] = run_rotation(docker, http, call, control, admin, survivor['key'])
     report['ok'] = True
     return report
 

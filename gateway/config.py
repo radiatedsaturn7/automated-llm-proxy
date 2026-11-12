@@ -1,4 +1,5 @@
 import json
+import base64
 from functools import lru_cache
 from urllib.parse import urlparse
 from typing import Literal
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     db_migration_statement_timeout_ms: int = Field(default=0, ge=0, le=86400000)
     db_migration_lock_timeout_ms: int = Field(default=0, ge=0, le=86400000)
     gateway_master_key: str
+    gateway_master_decrypt_keys: str = "[]"
     gateway_signing_key: str = Field(min_length=32)
     bootstrap_token: str = Field(min_length=32)
     environment: Literal["development", "production"] = "development"
@@ -70,7 +72,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_secrets(self):
-        Fernet(self.gateway_master_key.encode())
+        try:
+            Fernet(self.gateway_master_key.encode())
+            keys = json.loads(self.gateway_master_decrypt_keys)
+            if (not isinstance(keys, list) or len(keys) > 3
+                    or any(not isinstance(k, str) for k in keys)
+                    or len(set(keys)) != len(keys) or self.gateway_master_key in keys):
+                raise ValueError()
+            for key in keys:
+                Fernet(key.encode())
+            material = [base64.urlsafe_b64decode(k) for k in [self.gateway_master_key, *keys]]
+            if len(set(material)) != len(material):
+                raise ValueError()
+        except Exception:
+            raise ValueError("Invalid installation encryption key configuration") from None
         public = urlparse(self.public_url)
         if (public.scheme not in {"http", "https"} or not public.hostname or public.username
                 or public.password or public.query or public.fragment):

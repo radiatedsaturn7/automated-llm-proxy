@@ -131,10 +131,11 @@ async def live():
 async def ready():
     try:
         async with db.session_factory() as s:
-            row = await s.scalar(select(db.PolicyLock.id).where(db.PolicyLock.id == 1))
+            from .encryption import matches
+            row = await s.scalar(select(db.PolicyLock.master_key_fingerprint).where(db.PolicyLock.id == 1))
             applied = (await s.execute(select(versions.c.version).order_by(versions.c.version)
                                        .limit(HEAD + 1))).scalars().all()
-            if row != 1 or applied != list(range(1, HEAD + 1)):
+            if not matches(row) or applied != list(range(1, HEAD + 1)):
                 raise RuntimeError("Schema requires migration")
     except Exception:
         raise HTTPException(503, "Database/schema unavailable") from None

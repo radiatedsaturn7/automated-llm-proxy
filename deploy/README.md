@@ -298,6 +298,8 @@ mountedSecrets:
     METRICS_TOKEN: METRICS_TOKEN
     # Optional when configured for a confidential OIDC client:
     # OIDC_CLIENT_SECRET: OIDC_CLIENT_SECRET
+    # Optional JSON array of up to three decrypt-only fallback keys:
+    # GATEWAY_MASTER_DECRYPT_KEYS: GATEWAY_MASTER_DECRYPT_KEYS
 localPassword:
   enabled: false
   mfaPolicy: optional
@@ -320,8 +322,8 @@ environment, dotenv or settings source. Optional OIDC public settings can still
 be supplied with non-secret `extraEnv` entries.
 
 Use immutable, versioned Secret names and roll workloads deliberately. Preserve
-existing database credentials and master/signing key material unless executing a
-separately planned credential/key migration: mounting a new master key does not
+existing database credentials and master/signing key material unless executing the reviewed
+[offline encryption-key rotation](../docs/encryption-key-operations.md): mounting a new master key does not
 re-encrypt existing provider secrets. Values are loaded at process startup, not
 hot-reloaded or atomically coordinated across replicas. Secret-manager automation
 must respect those constraints.

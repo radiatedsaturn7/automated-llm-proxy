@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import timedelta, timezone
 
 import jwt
-from cryptography.fernet import Fernet
 from fastapi import HTTPException, Request
 from sqlalchemy import select
 
@@ -22,11 +21,13 @@ def aware(value):
 
 
 def encrypt(value):
-    return Fernet(get_settings().gateway_master_key.encode()).encrypt(value.encode()).decode()
+    from .encryption import primary
+    return primary().encrypt(value.encode()).decode()
 
 
 def decrypt(value):
-    return Fernet(get_settings().gateway_master_key.encode()).decrypt(value.encode()).decode()
+    from .encryption import cipher
+    return cipher().decrypt(value.encode()).decode()
 
 
 @dataclass

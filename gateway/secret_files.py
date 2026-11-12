@@ -8,6 +8,7 @@ ALLOWED = frozenset(
     {
         "DATABASE_URL",
         "GATEWAY_MASTER_KEY",
+        "GATEWAY_MASTER_DECRYPT_KEYS",
         "GATEWAY_SIGNING_KEY",
         "BOOTSTRAP_TOKEN",
         "METRICS_TOKEN",

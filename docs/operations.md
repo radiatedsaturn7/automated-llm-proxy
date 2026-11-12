@@ -117,3 +117,28 @@ the disposable network only; never use its override in a real deployment. CI rem
 the test project, volumes and TLS secrets even on failure. Normal pytest only tests
 harness safety/format/control contracts; actual two-container evidence comes from
 the explicit Compose acceptance step.
+
+### Offline encryption-key rotation acceptance
+
+The bounded replica fixture additionally exercises the offline rotation CLI with
+new synthetic keys after all existing load/accounting assertions complete. It
+drains its client requests (the intentionally uncertain crash reservation remains
+pending), verifies dry-run does not change admission, commits ciphertext and
+primary-fingerprint transformation, and checks **both stale replicas** return
+503 for readiness, a control-plane write and inference. Database counts and mock
+request counters must remain unchanged for those denied operations.
+
+One replica is then recreated with the target primary and decrypt-only fallback,
+without rerunning migrations; it must decrypt the existing provider credential
+and complete inference. An explicit reverse CLI rotation restores original-key
+ciphertexts and authority, permitting the untouched old replica to serve again.
+The switched replica is recreated back on the original configuration. The crash
+reservation remains pending throughout. Reports include boolean/count evidence,
+not keys. Rotation keys enter subprocess environments, never command arguments
+or logs; fixture cleanup destroys the database and containers.
+
+This is a disposable maintenance-window proof, not zero-downtime rotation,
+cryptographic erasure, a backup restoration exercise or production recovery SLA.
+Follow [encryption-key operations](encryption-key-operations.md) for draining,
+version compatibility, backup/key escrow and operator prerequisites. The report's
+original HA accounting totals precede the two additional rotation-probe requests.

@@ -127,3 +127,33 @@ absolute deadline in addition to its per-read timeout and 256 KiB body bound.
 Metadata single-flight lock waits also have a 15-second deadline, so an unavailable
 identity provider cannot serialize an indefinitely growing login queue. These
 failures return 503 and do not fall back to expired cached signing metadata.
+
+## Verified OIDC authorization changes
+
+A successful, cryptographically verified OIDC login is an authorization reconciliation
+boundary, not just a way to obtain another session. If the verified subject's configured
+group claim is missing, malformed, unmapped or maps ambiguously to multiple policies,
+an existing exact issuer/subject identity is disabled. A mapped unavailable team also
+fails closed. All its browser sessions and API/agent credentials are revoked in the
+same policy-writer transaction before the callback returns a denial. Unrecognized
+subjects are not created or email-linked on denied login. Invalid signatures, nonce,
+audience, freshness or other identity validation failures cannot revoke an account.
+
+An accepted role or primary-team mapping change revokes the subject's previous
+sessions and credentials, then issues only the fresh session with the new policy.
+Both transitions persist a subject-wide issued-at cutoff for ten minutes, including
+denied subjects not yet provisioned, rejecting
+queued callbacks with older or equal-issued tokens. Same-second claims are deliberately
+ambiguous and denied; obtain a newly issued token after that second. This ordering
+applies across gateway replicas and prevents stale callbacks restoring old privileges.
+Scheduled bounded maintenance removes expired cutoffs while preserving active ones.
+
+Denied identities do **not** automatically reactivate if groups later return. Correct
+the IdP group configuration, verify the user's entitlement, then have an independent
+administrator explicitly re-enable the user and obtain a strictly newer login token.
+Revoked API/agent keys remain revoked and require new explicit provisioning. A bad
+operator group-claim configuration can therefore disable affected users when they
+attempt login: validate mappings before rollout and retain a protected break-glass
+administrator. Groups are not polled between logins; immediate offboarding still
+requires an explicit gateway user disable, SCIM reconciliation, or appropriate IdP
+logout delivery. Back-channel logout revokes sessions, not independent API keys.

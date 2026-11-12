@@ -190,6 +190,9 @@ jobs:
             sleep 2
           done
           echo 'Disposable OIDC fixture did not become ready'; exit 1
+      - name: Verify mounted-secret nonroot startup and source conflicts
+        timeout-minutes: 2
+        run: docker compose --env-file tests/oidc/generated/fixture.env -f tests/oidc/compose.yaml exec -T gateway python /fixture/check_mounted.py
       - name: Exercise real PKCE, groups, CSRF and signed logout
         run: node tests/browser/node_modules/@playwright/test/cli.js test --config tests/oidc/playwright.config.mjs
       - name: Show fixture status on failure

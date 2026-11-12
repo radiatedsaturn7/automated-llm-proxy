@@ -2,7 +2,7 @@
 
 ## Transient-record cleanup
 
-Run `python -m gateway.maintenance` to preview up to 1,000 expired OIDC states, expired browser sessions, and rate buckets older than one day per table. `--apply` performs the cleanup and writes a metadata audit event; `--batch-size` accepts 1–10,000. Run repeatedly until zero records are eligible. The job uses the same database policy lock as live traffic; keep batches modest and schedule during low traffic. Run from a short-lived task with the same configured database and secrets as the gateway, never from every app replica.
+Run `python -m gateway.maintenance` to preview up to 1,000 expired OIDC states, expired OIDC logout/authorization tombstones, expired browser sessions, and rate buckets older than one day per table. `--apply` performs the cleanup and writes a metadata audit event; `--batch-size` accepts 1–10,000. Run repeatedly until zero records are eligible. The job uses the same database policy lock as live traffic; keep batches modest and schedule during low traffic. Run from a short-lived task with the same configured database and secrets as the gateway, never from every app replica.
 
 This command **never deletes keys, audit history, usage, or reservations**. In particular, unresolved reservations are not released by time: an interrupted upstream call may still have incurred charges. Release them through the explicitly acknowledged administrator reconciliation endpoint only after provider billing verification. Archival/export of audit and billing data, retention obligations and database backup policy remain deployment responsibilities.
 
@@ -33,7 +33,7 @@ no additional secret or cluster API permission is needed. The service account
 token is not mounted. Treat access to the workload as access to its database
 credentials, just as for the gateway itself.
 
-Each run deletes **only** expired OIDC states, expired browser sessions, and
+Each run deletes **only** expired OIDC states, expired OIDC logout/authorization tombstones, expired browser sessions, and
 rate buckets older than one day, up to `maintenance.batchSize` (default 1,000,
 maximum 10,000) **per table**. It does not delete usage, audit history, keys,
 reservations, prompt data, or provider circuit state. Each applied run appends

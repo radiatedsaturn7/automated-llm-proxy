@@ -38,3 +38,31 @@ deployment. The fixture intentionally uses Keycloak's `start-dev` and internal
 HTTP behind the private TLS proxy; its acceptance boundary is external TLS and
 actual OIDC, not production IdP operations. Browser user credentials are synthetic
 and the page only reaches `.test` hostnames mapped to the CI runner.
+
+## Mounted installation-secret acceptance
+
+This fixture runs both the migration and gateway production-mode process using
+six allowlisted `*_FILE` settings, not direct secret environment variables.
+The generator creates private `0600` source files containing newly generated
+dummy values. A **fixture-only**, network-disabled root init container copies
+these into a disposable named volume, owned by `root:10001`: directories `0550`,
+files `0440`. `..data` and per-key symlinks reproduce the relevant Kubernetes
+projection shape. App and migration mount the volume read-only and inherit the
+image's nonroot UID/GID `10001:10001`. No secret is copied into an image layer.
+
+Before actual browser/IdP flows, CI executes `check_mounted.py` inside the running
+gateway: it asserts effective UID, symlinks, owners, groups and file permissions;
+runs the application's read-only preflight; and confirms a subprocess rejects
+conflicting direct environment plus mounted master-key input. Diagnostics only
+print a fixed pass/fail message, never source values or exception details. The
+ordinary verified-TLS Keycloak login/logout then exercises settings loaded from
+those files, including the confidential client secret and session signing key.
+
+The projection is created once and refuses to overwrite an existing generation.
+Always remove the disposable stack with `down --volumes --remove-orphans` before
+rerunning, and remove `generated/` afterward. CI performs both on success/failure.
+This verifies container behavior, not a Kubernetes controller, secret-manager
+integration, hot reload or coordinated multi-replica secret rotation. The root
+init container is test infrastructure only; do not copy its elevated permissions
+into a production deployment. Production Helm projects an existing versioned
+Secret directly and does not need this init service.

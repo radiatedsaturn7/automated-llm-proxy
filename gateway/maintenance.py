@@ -16,6 +16,7 @@ async def cleanup(*, apply=False, batch_size=1000):
     bucket_cutoff = (cutoff - timedelta(days=1)).strftime("%Y%m%d%H%M")
     targets = [
         (db.OIDCState, db.OIDCState.digest, db.OIDCState.expires_at < cutoff),
+        (db.OIDCLogoutReplay, db.OIDCLogoutReplay.digest, db.OIDCLogoutReplay.expires_at < cutoff),
         (db.BrowserSession, db.BrowserSession.digest, db.BrowserSession.expires_at < cutoff),
         (db.RateBucket, db.RateBucket.id, func.substr(db.RateBucket.id, func.length(db.RateBucket.id) - 11) < bucket_cutoff),
     ]

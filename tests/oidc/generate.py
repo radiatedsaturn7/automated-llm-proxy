@@ -24,6 +24,13 @@ values = {
     'OIDC_CLIENT_SECRET': client_secret,
     'OIDC_TEST_PASSWORD': password,
 }
+installation = out / 'installation'
+installation.mkdir(mode=0o700)  # Fresh fixture only; do not overwrite an old generation.
+for name in ('DATABASE_URL', 'GATEWAY_MASTER_KEY', 'GATEWAY_SIGNING_KEY',
+             'BOOTSTRAP_TOKEN', 'METRICS_TOKEN', 'OIDC_CLIENT_SECRET'):
+    fd = os.open(installation / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as secret_file:
+        secret_file.write(values[name])
 with (out / 'fixture.env').open('w') as f:
     for name, value in values.items():
         f.write(f'{name}={value}\n')

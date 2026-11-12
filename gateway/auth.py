@@ -13,7 +13,7 @@ import httpx
 import jwt
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import select, delete, or_
+from sqlalchemy import select, delete, or_, update
 
 from sqlalchemy.exc import IntegrityError
 from . import db
@@ -259,14 +259,13 @@ async def oidc_callback(request: Request, state: str = "", code: str = ""):
     except (ValueError, TypeError, KeyError, jwt.PyJWTError) as exc:
         raise HTTPException(401, "Invalid identity token") from exc
     groups = group_claim(claims)
-    if not isinstance(groups, list) or not all(isinstance(g, str) for g in groups):
-        raise HTTPException(403, "Identity groups missing")
-    matches = [cfg.groups[g] for g in groups if g in cfg.groups]
-    # Multiple mappings to distinct policies are ambiguous; fail closed.
+    # A cryptographically verified subject whose current authorization claim is
+    # absent, malformed or ambiguous is denied, not left with stale authority.
+    matches = [cfg.groups[g] for g in groups if g in cfg.groups] if (
+        isinstance(groups, list) and all(isinstance(g, str) for g in groups)) else []
     distinct = {json.dumps(m, sort_keys=True) for m in matches}
-    if len(distinct) != 1:
-        raise HTTPException(403, "No unambiguous authorized SSO group")
-    mapping = matches[0]
+    mapping = matches[0] if len(distinct) == 1 else None
+    denied = mapping is None
     subject = cfg.oidc_issuer + "|" + claims["sub"]
     raw = secrets.token_urlsafe(32)
     async with db.transaction() as s:
@@ -291,28 +290,56 @@ async def oidc_callback(request: Request, state: str = "", code: str = ""):
         if logged_out:
             raise HTTPException(401, "Identity session has been logged out")
         user = await s.scalar(select(db.User).where(db.User.oidc_subject == subject))
-        if not user:
-            if await s.scalar(select(db.User).where(db.User.email == claims["email"].lower())):
-                raise HTTPException(409, "Email exists; administrator must explicitly link identity")
-            user = db.User(email=claims["email"].lower(), oidc_subject=subject, role=mapping["role"], team_id=mapping.get("team_id"), enabled=True)
-            s.add(user)
-        if not user.enabled:
-            raise HTTPException(403, "User disabled")
-        if mapping.get("team_id"):
+        if mapping and mapping.get("team_id"):
             team = await s.get(db.Team, mapping["team_id"])
-            if not team or not team.enabled:
-                raise HTTPException(403, "SSO team unavailable")
-        user.role, user.team_id = mapping["role"], mapping.get("team_id")
-        await s.flush()
-        s.add(db.BrowserSession(digest=digest(raw), user_id=user.id, csrf=secrets.token_urlsafe(32),
-                               oidc_issuer=cfg.oidc_issuer, oidc_subject=claims["sub"], oidc_sid=claims.get("sid"),
-                               expires_at=db.now() + timedelta(seconds=cfg.oidc_session_seconds)))
-        await db.audit(s, user.id, "oidc.login")
+            denied = not team or not team.enabled
+        if denied:
+            # Fence even a first-ever subject: a queued older allowed callback
+            # must not create an administrator after a newer verified denial.
+            await fence_oidc_authority(s, user, cfg, claims)
+            if user:
+                # Permanent disable fences already-in-flight valid callbacks as
+                # well as snapshot-bearing control-plane writes. Only explicit
+                # administrator reactivation can restore access after correction.
+                user.enabled = False
+                await db.audit(s, user.id, "oidc.authorization_revoked")
+        else:
+            if not user:
+                if await s.scalar(select(db.User).where(db.User.email == claims["email"].lower())):
+                    raise HTTPException(409, "Email exists; administrator must explicitly link identity")
+                user = db.User(email=claims["email"].lower(), oidc_subject=subject, role=mapping["role"], team_id=mapping.get("team_id"), enabled=True)
+                s.add(user)
+            if not user.enabled:
+                raise HTTPException(403, "User disabled")
+            if user.id and (user.role != mapping["role"] or user.team_id != mapping.get("team_id")):
+                await fence_oidc_authority(s, user, cfg, claims)
+                await db.audit(s, user.id, "oidc.authorization_changed")
+            user.role, user.team_id = mapping["role"], mapping.get("team_id")
+            await s.flush()
+            s.add(db.BrowserSession(digest=digest(raw), user_id=user.id, csrf=secrets.token_urlsafe(32),
+                                   oidc_issuer=cfg.oidc_issuer, oidc_subject=claims["sub"], oidc_sid=claims.get("sid"),
+                                   expires_at=db.now() + timedelta(seconds=cfg.oidc_session_seconds)))
+            await db.audit(s, user.id, "oidc.login")
+    # Raise after commit: raising inside transaction would roll back revocation.
+    if denied:
+        raise HTTPException(403, "No unambiguous authorized SSO policy")
     response = RedirectResponse("/admin" if user.role == "admin" else "/portal", status_code=303)
     response.set_cookie("gateway_session", raw, httponly=True, secure=cfg.public_url.startswith("https://"),
                         samesite="lax", max_age=cfg.oidc_session_seconds, path="/")
     response.delete_cookie("gateway_oidc_state", path="/auth/oidc")
     return response
+
+
+async def fence_oidc_authority(s, user, cfg, claims):
+    """Invalidate old credentials and fence queued old/equal-issued login claims."""
+    if user:
+        await s.execute(update(db.APIKey).where(db.APIKey.user_id == user.id).values(revoked=True))
+        await s.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == user.id))
+    # Reuse subject-wide logout ordering, not its external jti namespace. Token
+    # freshness is capped at 300s; retain the cutoff for 600s after observation.
+    s.add(db.OIDCLogoutReplay(digest=digest("policy:" + secrets.token_urlsafe(32)),
+        issuer=cfg.oidc_issuer, subject=claims["sub"], sid=None, issued_at=claims["iat"],
+        expires_at=db.now() + timedelta(seconds=600)))
 
 
 @router.post("/auth/oidc/backchannel-logout")

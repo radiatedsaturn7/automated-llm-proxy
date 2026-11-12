@@ -52,3 +52,14 @@ the caller key's model, rate and expiration ceilings. Global administrators with
 `admin` retain global authority without needing this additional permission.
 Browser sessions use current explicit membership roles. See
 [team-delegation.md](team-delegation.md) and `/team-admin` for the UI.
+
+Replacement-key rotation (account, administrator, or team API) carries the current
+shared-database-minute bucket's consumed requests and tokens to the new key inside
+the same transaction as revocation. Repeated rotations do not replenish RPM/TPM.
+Prior-minute consumption is not carried into a new window. In-place agent root
+rotation retains the key ID and therefore its existing bucket. Monthly accounting
+continues to belong to the user/team, independent of secret rotation.
+
+This preserves allowance when rotating the same credential; it is not an aggregate
+user/team rate limiter. Independently authorized new keys still receive their own
+rate windows.

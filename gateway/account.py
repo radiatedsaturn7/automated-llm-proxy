@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from . import db
+from .config import get_settings
 from .admin import record
 from .security import Identity, aware, identify, new_key, require_permission, revalidate_identity
 
@@ -33,7 +34,14 @@ async def profile(identity: Identity = Depends(member)):
                 db.Reservation.status == "pending",
             )
         )
+        password = await session.get(db.LocalPassword, identity.user.id)
+        factor = await session.get(db.LocalMFA, identity.user.id)
     return {
+        "can_change_password": bool(identity.session and not identity.session.oidc_issuer
+                                    and get_settings().local_password_enabled and password
+                                    and not (identity.user.scim_managed or identity.user.oidc_subject
+                                             or identity.user.scim_external_id)),
+        "local_mfa_enrolled": bool(factor and factor.seed) if identity.session else None,
         "id": identity.user.id,
         "email": identity.user.email,
         "role": identity.user.role,
@@ -105,3 +113,22 @@ async def rotate(key_id: str, identity: Identity = Depends(member)):
         await inherit_rotation_allowance(session, key, replacement)
         await db.audit(session, identity.user.id, "account.key.rotate", key.id, replacement_id=replacement.id)
         return {**record(replacement), "key": raw}
+
+
+async def browser_member(identity: Identity = Depends(member)):
+    if not identity.session:
+        raise HTTPException(403, "Browser session required")
+    return identity
+
+
+@router.post("/sessions/revoke-others")
+async def revoke_other_sessions(identity: Identity = Depends(browser_member)):
+    from sqlalchemy import delete
+    async with db.transaction() as session:
+        current = await revalidate_identity(session, identity)
+        await session.execute(delete(db.BrowserSession).where(
+            db.BrowserSession.user_id == current.user.id,
+            db.BrowserSession.digest != current.session.digest,
+        ))
+        await db.audit(session, current.user.id, "account.sessions.revoke_others")
+    return {"revoked": True}

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy import delete, select
 
 from . import db
+from .account import browser_member
 from .config import get_settings
 from .security import Identity, admin, aware, digest, revalidate_admin
 
@@ -190,4 +191,59 @@ async def issue_session(s, user, request, mfa=False):
     response = JSONResponse({"redirect": target})
     response.set_cookie("gateway_session", raw, httponly=True, secure=cfg.public_url.startswith("https://"),
                         samesite="lax", max_age=cfg.local_session_seconds, path="/")
+    return response
+
+
+class ChangePasswordBody(BaseModel):
+    current_password: SecretStr = Field(min_length=1, max_length=128)
+    new_password: SecretStr = Field(min_length=15, max_length=128)
+    code: str | None = Field(default=None, pattern=r"^[0-9]{6}$")
+
+
+# Browser-only: a scoped API key must never become an account takeover primitive.
+@router.post("/account/api/password", status_code=204)
+async def change_password(body: ChangePasswordBody, request: Request,
+                          identity: Identity = Depends(browser_member)):
+    from .local_mfa import origin, eligible, totp
+    from .security import decrypt, revalidate_identity
+    origin(request)
+    if identity.session.oidc_issuer:
+        raise HTTPException(409, "Manage your password at your identity provider")
+    await throttle(identity.user.email, request.client.host if request.client else "unknown")
+    async with db.session_factory() as s:
+        password = await s.get(db.LocalPassword, identity.user.id)
+        encoded = password.password_hash if password else None
+    valid = await derive(verify, body.current_password.get_secret_value(), encoded)
+    if not valid:
+        raise HTTPException(401, "Current credentials are invalid")
+    replacement = await derive(password_hash, body.new_password.get_secret_value())
+    async with db.transaction() as s:
+        current = await revalidate_identity(s, identity)
+        password = await s.get(db.LocalPassword, current.user.id)
+        if (not eligible(current.user) or not password or password.password_hash != encoded
+                or current.session.oidc_issuer
+                or not await db.active_membership(s, current.user, current.user.team_id)):
+            raise HTTPException(401, "Authorization changed")
+        factor = await s.get(db.LocalMFA, current.user.id)
+        if factor and factor.seed:
+            seed = decrypt(factor.seed)
+            counter = int(db.now().timestamp()) // 30
+            matches = [step for step in (counter - 1, counter, counter + 1)
+                       if step > factor.last_counter
+                       and hmac.compare_digest(totp(seed, step), body.code or "")]
+            if not matches:
+                raise HTTPException(401, "Current credentials are invalid")
+            factor.last_counter = max(matches)
+        password.password_hash = replacement
+        if factor:
+            factor.grant_digest, factor.grant_expires = None, None
+            factor.challenge_digest, factor.challenge_expires = None, None
+            factor.pending_seed, factor.password_binding = None, None
+        # Reauthentication is explicit, including this browser. Keep active MFA.
+        await s.execute(delete(db.BrowserSession).where(db.BrowserSession.user_id == current.user.id))
+        await db.audit(s, current.user.id, "account.password.change")
+    from fastapi.responses import Response
+    response = Response(status_code=204)
+    response.delete_cookie("gateway_session", path="/", httponly=True,
+                           secure=get_settings().public_url.startswith("https://"), samesite="lax")
     return response

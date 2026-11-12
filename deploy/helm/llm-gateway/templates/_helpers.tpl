@@ -39,7 +39,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- fail "Use either existingSecret or mountedSecrets.existingSecret, not both" -}}
 {{- end -}}
 {{- range .Values.extraEnv -}}
-{{- if or (eq .name "LOCAL_PASSWORD_ENABLED") (eq .name "LOCAL_MFA_POLICY") (eq .name "GATEWAY_SECRETS_DIR") -}}
+{{- if or (eq .name "LOCAL_PASSWORD_ENABLED") (eq .name "LOCAL_MFA_POLICY") (eq .name "GATEWAY_SECRETS_DIR") (eq .name "SHUTDOWN_GRACE_SECONDS") -}}
 {{- fail "Use dedicated chart settings rather than duplicate extraEnv configuration" -}}
 {{- end -}}
 {{- if $mounted -}}
@@ -70,6 +70,8 @@ env:
     value: {{ .Values.environment | quote }}
   - name: PUBLIC_URL
     value: {{ .Values.publicUrl | quote }}
+  - name: SHUTDOWN_GRACE_SECONDS
+    value: {{ .Values.shutdownGraceSeconds | quote }}
   - name: PROVIDER_TIMEOUT_SECONDS
     value: {{ .Values.providerTimeoutSeconds | quote }}
   - name: CIRCUIT_BREAKER_ENABLED

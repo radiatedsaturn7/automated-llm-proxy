@@ -29,7 +29,14 @@ async def lifespan(app):
     app.state.upstream = httpx.AsyncClient(timeout=httpx.Timeout(cfg.provider_timeout_seconds, connect=10),
         limits=httpx.Limits(max_connections=200, max_keepalive_connections=50), follow_redirects=False, trust_env=False)
     app.state.accounting_tasks = set()
+    if not hasattr(app.state, "active_requests"):
+        app.state.active_requests = set()
     yield
+    # Uvicorn starts lifespan shutdown immediately after cancelling timed-out
+    # requests. Their wait_for children may still be unwinding before scheduling
+    # settlement. Retain request tasks until that cleanup has actually finished.
+    while app.state.active_requests:
+        await asyncio.gather(*list(app.state.active_requests), return_exceptions=True)
     # Finishing a watchdog can spawn a settlement task. Drain every generation
     # before disposing the upstream client/database, not just the first snapshot.
     while app.state.accounting_tasks:
@@ -38,6 +45,22 @@ async def lifespan(app):
         app.state.accounting_tasks.difference_update(snapshot)
     await app.state.upstream.aclose()
     await db.engine.dispose()
+
+
+class RequestDrainMiddleware:
+    def __init__(self, app, active_requests):
+        self.app = app
+        self.active_requests = active_requests
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http':
+            return await self.app(scope, receive, send)
+        task = asyncio.current_task()
+        self.active_requests.add(task)
+        try:
+            return await self.app(scope, receive, send)
+        finally:
+            self.active_requests.discard(task)
 
 
 class BodyLimitMiddleware:
@@ -97,6 +120,8 @@ class BodyLimitMiddleware:
 
 
 app = FastAPI(title="Brrrtgate", version="0.1.0", lifespan=lifespan)
+app.state.active_requests = set()
+app.add_middleware(RequestDrainMiddleware, active_requests=app.state.active_requests)
 app.add_middleware(BodyLimitMiddleware)
 app.include_router(teams.router)
 app.include_router(comparisons.router)

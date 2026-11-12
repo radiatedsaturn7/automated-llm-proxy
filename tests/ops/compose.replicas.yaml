@@ -5,12 +5,15 @@ services:
       - ./tests/ops/load_provider.py:/mock/server.py:ro
   gateway:
     environment:
+      SHUTDOWN_GRACE_SECONDS: '5'
       GATEWAY_MASTER_DECRYPT_KEYS: ${GATEWAY_MASTER_DECRYPT_KEYS:-[]}
     restart: 'no'
     ports: !override ['127.0.0.1:8180:8080']
   gateway-peer:
+    stop_grace_period: 420s
     image: automated-llm-proxy:smoke
     environment:
+      SHUTDOWN_GRACE_SECONDS: '5'
       DATABASE_URL: ${DATABASE_URL:?Set disposable DATABASE_URL}
       GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?Set disposable key}
       GATEWAY_MASTER_DECRYPT_KEYS: ${GATEWAY_MASTER_DECRYPT_KEYS:-[]}

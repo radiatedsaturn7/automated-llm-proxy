@@ -404,6 +404,21 @@
           ]
         }
       }
+    },
+    "shutdownGraceSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600
+    },
+    "preStopDelaySeconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 120
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 31,
+      "maximum": 4000
     }
   },
   "allOf": [

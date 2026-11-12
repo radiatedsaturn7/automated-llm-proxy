@@ -7,6 +7,9 @@ let allowance = null;
 let resetOperation = null;
 let resetInFlight = false;
 let allowanceGeneration = 0;
+let usageGeneration = 0;
+let usageCursor = null;
+let usageBusy = false;
 const message = document.getElementById('message');
 const el = id => document.getElementById(id);
 function clearSecret() { clearTimeout(secretTimer); el('secret').value = ''; }
@@ -14,6 +17,7 @@ function clearPasswords() { el('password-form').reset(); }
 function clearLocal() {
   signedOut = true; ++generation; csrf = '';
   ++allowanceGeneration; allowance = null; resetOperation = null; el('allowance-panel').hidden = true; el('allowance-summary').textContent = ''; el('allowance-message').textContent = '';
+  clearUsage();
   clearPasswords(); el('security').hidden = true;
   clearSecret(); el('secret-dialog').close(); el('profile').textContent = ''; el('keys').replaceChildren();
 }
@@ -34,7 +38,7 @@ async function load() {
     el('password-form').hidden = !profile.can_change_password;
     el('password-mfa').hidden = !profile.local_mfa_enrolled;
     el('password-code').required = Boolean(profile.local_mfa_enrolled);
-    if (csrf) loadAllowance();
+    if (csrf) { loadAllowance(); loadUsage(); }
     const visible = {...profile}; delete visible.csrf_token;
     el('profile').textContent = JSON.stringify(visible, null, 2);
     const keys = await api('/account/api/keys');
@@ -68,6 +72,7 @@ async function load() {
   } catch (error) {
     if (!signedOut && version === generation) {
       ++allowanceGeneration; allowance = null; el('allowance-panel').hidden = true;
+      clearUsage();
       clearPasswords(); el('security').hidden = true;
       csrf = ''; el('profile').textContent = ''; el('keys').replaceChildren(); clearSecret(); el('secret-dialog').close();
       message.textContent = error.message;
@@ -172,5 +177,48 @@ el('reset-usage').addEventListener('click', async () => {
     if (!signedOut) renderAllowance();
   }
 });
+function clearUsage() {
+  ++usageGeneration; usageCursor = null; usageBusy = false;
+  el('usage-panel').hidden = true; el('usage-rows').replaceChildren();
+  el('usage-window').textContent = ''; el('usage-message').textContent = '';
+  el('more-usage').hidden = true; el('refresh-usage').disabled = false;
+}
+async function loadUsage(next = false) {
+  if (signedOut || !csrf || (next && (usageBusy || !usageCursor))) return;
+  const version = ++usageGeneration;
+  const cursor = next ? usageCursor : null;
+  usageBusy = true; el('usage-panel').hidden = false;
+  el('more-usage').disabled = true; el('refresh-usage').disabled = true;
+  el('usage-message').textContent = 'Loading usage…';
+  // Clear old rows when changing windows, never mix pages from distinct queries.
+  if (!next) { usageCursor = null; el('usage-rows').replaceChildren(); el('usage-window').textContent = ''; el('more-usage').hidden = true; }
+  try {
+    const data = await api('/account/api/usage?limit=50' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+    if (signedOut || version !== usageGeneration) return;
+    const rows = document.createDocumentFragment();
+    for (const item of data.records) {
+      const row = document.createElement('tr');
+      const time = new Date(item.created_at);
+      const values = [Number.isFinite(time.getTime()) ? time.toISOString() : 'Unknown', item.model,
+        item.input_tokens, item.output_tokens, (item.cost_micros / 1000000).toFixed(6), item.estimated ? 'Estimated' : 'Reported'];
+      for (const value of values) { const cell = document.createElement('td'); cell.textContent = String(value); row.append(cell); }
+      rows.append(row);
+    }
+    // Replace rather than accumulate an unbounded DOM/history on long sessions.
+    el('usage-rows').replaceChildren(rows);
+    usageCursor = data.next_cursor;
+    el('usage-window').textContent = `Window (UTC): ${data.since} to ${data.until}. New settlements appear after Refresh.`;
+    el('usage-message').textContent = data.records.length ? `${data.records.length} settled requests on this page.` : 'No settled requests in this window.';
+    el('more-usage').hidden = !usageCursor;
+  } catch (_) {
+    if (!signedOut && version === usageGeneration) el('usage-message').textContent = 'Usage unavailable. Refresh or retry the next page.';
+  } finally {
+    if (!signedOut && version === usageGeneration) {
+      usageBusy = false; el('more-usage').disabled = false; el('refresh-usage').disabled = false;
+    }
+  }
+}
+el('refresh-usage').addEventListener('click', () => loadUsage());
+el('more-usage').addEventListener('click', () => loadUsage(true));
 window.addEventListener('pagehide', clearLocal);
 load();

@@ -25,3 +25,30 @@ Labels never use request IDs, raw paths/queries, users, model aliases or provide
 [Example alert rules](../deploy/monitoring/prometheus-alerts.yaml) and [Grafana dashboard](../deploy/monitoring/grafana-dashboard.json) are starting points. Set your actual Prometheus job label (`thunderbolt` in examples), provision the datasource, validate queries against your deployment and tune thresholds to workload/SLOs. Streaming requests naturally have longer durations; the latency alert intentionally targets admin/auth routes. These files do not configure a Prometheus server, credential distribution, paging destination, retention or an availability SLA.
 
 This release has no OpenTelemetry span exporter, per-tenant dashboards, immutable audit export or automated alert delivery. Database usage/audit records remain distinct from operational logs; apply access control and retention to both.
+
+## Overload signals
+
+- `gateway_inflight_requests{pool}`: current HTTP work admitted by this process;
+  `pool` is `application` or `operations`. The dashboard sums each pool across
+  independently scraped replicas; it is not utilization percentage or a global
+  admission limit. Long streams retain slots until completion.
+- `gateway_overload_rejections_total{pool,reason}`: fail-fast capacity rejections;
+  `reason` is `inflight` or `accounting`. Accounting is the conservative retained
+  task admission threshold, including stream watchdogs, not measured queue latency
+  or a hard task cap. Rejections also appear as HTTP 503 attempts.
+
+The example application-overload alert requires more than 20 rejections in a
+rolling five-minute window, sustained for five minutes, on an individual replica.
+A separate operational-pool alert requires more than five rejections per window
+for five minutes. Small counts, brief bursts and other scrape jobs do not trigger
+these rules. These are volume thresholds, not error ratios: healthy probe traffic
+cannot dilute application overload, but low-volume rejected requests intentionally
+may not alert. Both reasons contribute to application overload; inspect the
+pool/reason dashboard panel to distinguish in-flight pressure from accounting.
+Check slow providers, database health and cleanup before increasing limits. Use
+per-instance series to diagnose imbalance hidden by the dashboard's aggregate.
+
+CI checks rule syntax and executes synthetic `promtool test rules` scenarios,
+including sustained overload, low counts, operational isolation, transient bursts,
+per-replica isolation and counter resets. These examples neither install monitoring
+nor establish measured capacity, a paging destination or an SLO.

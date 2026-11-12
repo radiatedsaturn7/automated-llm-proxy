@@ -67,6 +67,8 @@ jobs:
       - run: docker build -t automated-llm-proxy:ci .
       - name: Validate Prometheus alert rules
         run: docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/rules:ro" prom/prometheus:v3.2.1 check rules /rules/prometheus-alerts.yaml
+      - name: Test Prometheus alert behavior
+        run: docker run --rm --entrypoint /bin/promtool -w /rules -v "$PWD/deploy/monitoring:/rules:ro" prom/prometheus:v3.2.1 test rules /rules/prometheus-alerts.test.yaml
       - name: Validate Grafana dashboard structure
         run: python tests/browser/check-monitoring.py
 

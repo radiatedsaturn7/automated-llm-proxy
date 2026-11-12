@@ -148,14 +148,14 @@ def discovery_resources(kind):
                 "schemas": [PREFIX + "core:2.0:Schema"],
                 "id": USER,
                 "name": "User",
-                "description": "Thunderbolt supported User attribute subset; userName must be email",
+                "description": "Brrrtgate supported User attribute subset; userName must be email",
                 "attributes": [username, attribute("active", "boolean")],
             },
             {
                 "schemas": [PREFIX + "core:2.0:Schema"],
                 "id": GROUP,
                 "name": "Group",
-                "description": "Thunderbolt single-team Group subset; at most 1000 members",
+                "description": "Brrrtgate single-team Group subset; at most 1000 members",
                 "attributes": [
                     attribute("displayName", required=True),
                     attribute(

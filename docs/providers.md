@@ -6,7 +6,7 @@ Configure `kind: openai`, an HTTPS API-prefix base URL (for example `https://api
 
 ## Azure OpenAI v1
 
-Configure `kind: azure_openai`, base URL `https://RESOURCE.openai.azure.com/openai/v1`, API key, and deployment name as `upstream_model`. Uses the `api-key` header. Supports v1 text chat, tools, streaming and embeddings. Legacy dated `api-version` query APIs and Microsoft Entra managed-identity credentials are not implemented. No Azure-specific resources are created by Thunderbolt.
+Configure `kind: azure_openai`, base URL `https://RESOURCE.openai.azure.com/openai/v1`, API key, and deployment name as `upstream_model`. Uses the `api-key` header. Supports v1 text chat, tools, streaming and embeddings. Legacy dated `api-version` query APIs and Microsoft Entra managed-identity credentials are not implemented. No Azure-specific resources are created by Brrrtgate.
 
 ## Anthropic
 

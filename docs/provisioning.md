@@ -1,6 +1,6 @@
 # SCIM provisioning
 
-Thunderbolt exposes a conservative SCIM 2.0 subset at `/scim/v2`. Authenticate with an expiring administrator API credential. This credential has administrative authority: protect it in your identity provider's secret store, limit its lifetime, and revoke it when the integration is removed. A dedicated limited-scope SCIM principal is not yet available.
+Brrrtgate exposes a conservative SCIM 2.0 subset at `/scim/v2`. Authenticate with an expiring administrator API credential. This credential has administrative authority: protect it in your identity provider's secret store, limit its lifetime, and revoke it when the integration is removed. A dedicated limited-scope SCIM principal is not yet available.
 
 Supported: authenticated ServiceProviderConfig, ResourceTypes and Schemas discovery; list/get/create Users and Groups; userName/displayName/externalId exact equality filters; pagination up to 100 resources; persistent unique externalId; User PATCH replace active/userName/externalId; User DELETE as audited deactivation; User PUT replacement; Group PATCH add/replace/remove members, exact `members[value eq "id"]` removal, displayName rename and externalId updates. Up to 20 operations execute atomically. A user belongs to one gateway team. Conflicting team assignment is rejected instead of silently moving access. Administrator accounts and teams containing them cannot be changed through SCIM. Unsupported attributes/operations fail explicitly, not silently.
 

@@ -1,10 +1,12 @@
-# Thunderbolt
+# Brrrtgate
 
 **Brrrrt it into production**
 
-![Thunderbolt A-10 shark-mouth artwork](gateway/static/thunderbolt-banner.png)
+![Brrrtgate A-10 shark-mouth artwork](gateway/static/brrrtgate-banner.png)
 
 Apache-2.0 LLM gateway with a stateless application tier and external SQL policy/accounting state. An initial implementation for evaluation and hardening, **not a claim of production readiness or compliance certification**.
+
+The project display name is now **Brrrtgate**. Existing installation identifiers remain compatible; see [branding and compatibility](docs/branding.md).
 
 ## Implemented capabilities
 

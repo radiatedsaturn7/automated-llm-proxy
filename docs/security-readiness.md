@@ -1,6 +1,6 @@
 # Internal security and operational readiness
 
-This is Thunderbolt's internal evidence checklist, not a certification, external
+This is Brrrtgate's internal evidence checklist, not a certification, external
 audit report, or blanket production approval. No outside audit is commissioned
 by this checklist. Owners should record a deployment-specific decision, exact
 commit/image digest, configuration, test run links, remaining risks and rollback

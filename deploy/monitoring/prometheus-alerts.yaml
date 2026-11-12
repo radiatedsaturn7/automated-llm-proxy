@@ -7,7 +7,7 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: Thunderbolt scrape target is unavailable
+          summary: Brrrtgate scrape target is unavailable
           description: Check pod health, routing and the metrics credential before assuming inference is down.
       - alert: ThunderboltHttpErrorRate
         expr: |
@@ -18,7 +18,7 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: Thunderbolt HTTP 5xx ratio exceeds 5 percent
+          summary: Brrrtgate HTTP 5xx ratio exceeds 5 percent
           description: Inspect request IDs in metadata logs, provider availability and policy database health.
       - alert: ThunderboltControlPlaneLatency
         expr: |
@@ -27,5 +27,5 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: Thunderbolt control-plane p95 latency exceeds two seconds
+          summary: Brrrtgate control-plane p95 latency exceeds two seconds
           description: Check database lock contention and identity provider response time.

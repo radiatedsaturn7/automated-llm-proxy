@@ -33,6 +33,44 @@ Keycloak, and deployment checks. Tests use synthetic provider responses and secr
   require deployment-specific testing, owners and explicit residual-risk decisions.
   No external review or production rollout is represented by this ledger.
 
-Latest listed increment merged as `eaffbe45151a9eb9c260615d55eed2c25738c6bd`.
+Historical round-17 increment merged as `eaffbe45151a9eb9c260615d55eed2c25738c6bd`.
 The corresponding integrated local run passed 935 tests with 8 skipped, including
 rendered Helm checks. Local counts are not a substitute for the linked CI jobs.
+
+
+## Subsequent verified build hardening
+
+This is a selected ledger, not a claim that every intervening PR is inventoried.
+Both increments below passed all five CI jobs plus the separate SAST, secret,
+parser-property and IaC workflows for the listed exact heads before merging.
+
+| PR | Tested head | CI run | Merge | Verified change |
+| --- | --- | --- | --- | --- |
+| [59](https://github.com/radiatedsaturn7/automated-llm-proxy/pull/59) | `d39a99040f32f7cb7c83434ff21f268b81bd44eb` | [43322178729](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43322178729) | `bb95b442563e8de855aaff5642c789c587671f08` | Explicit container builder inputs, excluding unrelated local files from builder layers |
+| [60](https://github.com/radiatedsaturn7/automated-llm-proxy/pull/60) | `52d51a627c6e860a67ddf4929a9689e93e3aff5c` | [43324186181](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43324186181) | `290037e8a19fd8d0a6c6cd7730a38a4dcb6cfadc` | Hash-locked/audited builder-only backend; no implicit build-isolation dependency resolution |
+
+**Unresolved image gate:** draft [PR45](https://github.com/radiatedsaturn7/automated-llm-proxy/pull/45)
+remains a release blocker, not part of these successful controls.
+[Run 43321013868](https://github.com/radiatedsaturn7/automated-llm-proxy/actions/runs/43321013868)
+reported 59 High package matches across 17 distinct CVEs, zero Critical, against its
+recorded merge/image identity before PRs 59/60. This is historical evidence, not a
+scan of the newer merged image. No blanket exemption, clean-image claim,
+external audit or certification follows from the green application checks.
+
+## Dependency artifacts on unsuccessful runs
+
+The Python job prepares source revision and lock copies before installation,
+records installed packages before test gates, and attempts to upload available
+evidence even after a failure. Its outcome manifest distinguishes `success`,
+`failure`, `skipped` and cancellation states; a missing report is not a clean scan.
+Runtime dependency auditing can still run after tests fail if installation
+succeeded. It does not make the job pass, ignore audit errors or run after
+cancellation. Build-audit JSON describes the separate build lock, not runtime OS
+packages; runtime-audit JSON covers the installed Python test/runtime environment.
+
+Artifacts are best effort: a killed runner, failed checkout/setup or interrupted
+upload can prevent collection. Retention remains 14 days. Preserve release records
+in the operator's controlled archive before expiry and record missing evidence.
+The manifest includes only named gate outcomes, not arbitrary environment values.
+No passwords, provider prompts/responses, or operator credentials should be
+introduced into these disposable CI jobs.

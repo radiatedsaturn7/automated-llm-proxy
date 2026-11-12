@@ -18,6 +18,7 @@ from . import local_auth
 from . import account, admin, agent_rotation, auth, comparisons, db, enrollment, exports, inference, prompts, responses, scim, teams
 from .config import get_settings
 from .observability import ObservabilityMiddleware
+from .overload import OverloadMiddleware
 from .migrate import HEAD, versions
 
 
@@ -203,6 +204,8 @@ async def metrics(request: Request):
 async def admin_page():
     return FileResponse(Path(__file__).parent / "static" / "index.html")
 
+
+app.add_middleware(OverloadMiddleware, accounting_tasks=lambda: getattr(app.state, 'accounting_tasks', ()))
 
 # Registered last so body limits, auth errors and security-header middleware are observed.
 app.add_middleware(ObservabilityMiddleware)

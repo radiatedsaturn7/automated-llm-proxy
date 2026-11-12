@@ -220,3 +220,31 @@ window intentionally permits truncation during shutdown. Test your chosen
 window, ingress propagation, long streams and database failures on the actual
 deployment. Disposable signal tests do not prove Kubernetes zero-downtime,
 managed-database failover, or a production SLA.
+
+### Per-process overload shedding
+
+`MAX_INFLIGHT_REQUESTS` (default 128, range 1–10000) caps concurrent HTTP work
+before request bodies are buffered. Capacity is held through the entire response,
+including streaming, and released on completion, cancellation or failure. All paths
+and methods share this application pool except exact `GET /health/live`,
+`GET /health/ready` and `GET /metrics`, which share a separate bounded
+`MAX_INFLIGHT_OPERATIONS` pool (default 8, range 1–128). Metrics authentication is
+unchanged. Readiness still depends on the database and can fail or wait when its
+pool is exhausted; reserved HTTP capacity does not reserve database connections.
+
+When capacity is exhausted, requests receive 503 with `Retry-After: 1`, without
+body ingestion, authentication, reservation or upstream dispatch. HTTP/1.x
+connections are closed; HTTP/2 responses omit connection-specific headers.
+There is no waiting queue, tenant fairness or cluster-wide concurrency limit.
+Each process/replica has its own capacity, so scaling changes total capacity.
+Tune against measured workload and memory rather than treating the defaults as
+capacity guarantees. Ingress connection/rate/body limits remain necessary: these
+limits do not bound idle TCP connections, server transport buffers or attack traffic.
+
+Application admission also pauses when retained accounting tasks reach twice
+`MAX_INFLIGHT_REQUESTS`. This includes active stream watchdogs and detached
+settlement work after cancellation. It is a conservative admission threshold,
+not a hard task cap: already admitted requests can enqueue further cleanup.
+Cleanup is never discarded to satisfy the threshold, and operational requests
+remain eligible for their separate pool. The `gateway_inflight_requests` gauge
+and `gateway_overload_rejections_total` counter expose fixed pool/reason labels.

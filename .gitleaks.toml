@@ -1,0 +1,7 @@
+title = "Brrrtgate full-history secret scan"
+
+[extend]
+useDefault = true
+
+# No path or rule allowlists. Historical synthetic matches, if any, are
+# individually documented and pinned by commit/path/rule/line in .gitleaksignore.

@@ -26,7 +26,7 @@
     ],
     providers: [
       { name: "name", label: "Provider name", required: true },
-      { name: "kind", label: "Adapter", options: ["openai", "anthropic", "azure_openai", "gemini"], value: "openai" },
+      { name: "kind", label: "Adapter", options: ["openai", "anthropic", "azure_openai", "gemini", "bedrock_converse"], value: "openai", help: "Bedrock Converse supports native text chat without streaming; use a regional bedrock-runtime HTTPS origin and a Bedrock bearer API key. IAM/SigV4 is not supported by this adapter." },
       { name: "base_url", label: "Trusted provider base URL", type: "url", required: true, value: "https://api.openai.com/v1" },
       { name: "api_key", label: "Provider API key", type: "password", required: true, help: "Stored encrypted by the gateway. Use only credentials approved for this deployment." },
       { name: "models", label: "Model aliases and prices (JSON object)", type: "json", required: true, value: '{"example-model":{"upstream_model":"provider-model-id","input_cost_per_million":1,"output_cost_per_million":3}}', help: "Replace the example with a real provider model and current prices. Prices are not automatically discovered." },

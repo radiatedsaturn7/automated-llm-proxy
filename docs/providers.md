@@ -33,6 +33,17 @@ Contract references checked 2026-11-11: [define tools](https://platform.claude.c
 [parallel tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use),
 and [streaming](https://platform.claude.com/docs/en/build-with-claude/streaming).
 
+## Amazon Bedrock
+
+The native `bedrock_converse` adapter supports bearer-key, nonstreaming text chat only.
+It validates regional runtime origins and short model/profile IDs, rejects unsupported
+requests before reservation, and normalizes text/stop reasons/usage conservatively.
+No IAM/SigV4 credential chain, native streaming, tools, embeddings, reasoning, cache
+billing or ARNs are supported. Existing `openai` configuration can separately target
+AWS OpenAI-compatible endpoints, including SSE where the model supports it.
+See [Bedrock setup and limits](bedrock.md). Synthetic contracts passed; no live AWS
+credentials or model calls were used.
+
 ## Failure semantics
 
 One request selects the lowest-priority-number enabled matching route. No automatic retry or failover after dispatch: network errors and interrupted streams can still be billed by providers. Unknown outcomes retain conservative accounting; provider billing reconciliation is explicit. Caller cancellation schedules accounting before closing upstream connections, but abrupt process termination retains the pending reservation.

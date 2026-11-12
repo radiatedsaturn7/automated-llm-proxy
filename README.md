@@ -10,7 +10,7 @@ The project display name is now **Brrrtgate**. Existing installation identifiers
 
 ## Implemented capabilities
 
-- OpenAI-compatible text chat, SSE streaming, embeddings and model discovery; Azure OpenAI v1, native Anthropic text-chat and Gemini text adapters; stateless text Responses compatibility.
+- OpenAI-compatible text chat, SSE streaming, embeddings and model discovery; Azure OpenAI v1, native Anthropic text-chat and Gemini text adapters; bounded nonstreaming Amazon Bedrock Converse text adapter; stateless text Responses compatibility.
 - Explicit provider/model aliases and prices, encrypted provider credentials, model allowlists and priority routing.
 - Users, primary and explicit secondary teams, scoped team administration, monthly USD budgets, concurrent reservations and per-key request/token admission limits.
 - Hashed API credentials with explicit inference/admin/account/provisioning/team_admin permissions, expiration and revocation; rotation preserves scope and expiry.

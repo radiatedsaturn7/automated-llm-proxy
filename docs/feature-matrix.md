@@ -98,3 +98,13 @@ See [architecture](architecture.md), [security](security.md), [evaluation](evalu
 ### Identity administration increment
 
 Explicit administrator-verified OIDC identity linking and per-user/all-browser-session revocation are implemented and audited. Identity linking never guesses from matching email and does not replace existing links. Identity linking/session revocation are distinct from the separate SCIM subset, IdP-session revocation and automatic group-change reconciliation. Provider model-map updates now use the same size and alias validation as provider creation.
+
+## Bounded Amazon Bedrock adapter
+
+Native Converse bearer-key nonstreaming text chat is implemented with strict
+request/response translation and existing asynchronous deadlines, response bounds,
+health and accounting. Streaming/tools/multimodal/embeddings/IAM SigV4 are not
+implemented for this adapter. The existing OpenAI adapter separately supports
+compatible AWS Chat Completions endpoints, subject to model/region capabilities.
+Synthetic HTTP contract/admission/settlement tests are not live AWS certification.
+See [Bedrock](bedrock.md) for exact scope and official references.
